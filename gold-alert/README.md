@@ -180,7 +180,7 @@ npx wrangler secret put API_TOKEN
 
 按提示粘贴你的 Token，回车。
 
-> Token **不要**写进 HTML / JS 源码里。手机网页第一次打开时会让你手动输入，并保存在浏览器 `sessionStorage`。
+> Token **不要**写进 HTML / JS 源码里。手机网页打开时手动输入一次，明文显示，保存在浏览器 `localStorage`，当天再次打开不用再输，第二天需要重新输入。
 
 ---
 
@@ -494,7 +494,7 @@ Token 存在 Cloudflare Secret 中。你可以用原来的字符串重新输入�
 ## 十七、安全说明
 
 - API 全部需要 Token，不是公开接口
-- 手机网页 **不硬编码** Token（手动输入后存 sessionStorage）
+- 手机网页 **不硬编码** Token（手动输入后存 localStorage，仅当天有效）
 - Telegram Bot Token **仅**存于 Cloudflare Worker Secret
 - EA **不包含** Telegram Token；触发后由 Cloudflare 代发
 
