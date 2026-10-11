@@ -1,6 +1,7 @@
 /**
  * GOLD ALERT - Mobile web client
- * API Token is entered by user and stored in sessionStorage (never hardcoded).
+ * API Token is entered by the user (never hardcoded) and kept in localStorage
+ * until the next local calendar day.
  */
 
 (function () {
@@ -9,6 +10,7 @@
   const MAX_ALERTS = 11;
   const REFRESH_MS = 1000;
   const TOKEN_KEY = "gold_alert_api_token";
+  const TOKEN_DAY_KEY = "gold_alert_api_token_day";
 
   /** @type {Array<{id?: number|null, price: string, enabled: boolean, triggered: boolean}>} */
   let localAlerts = [];
@@ -25,21 +27,90 @@
   // Auth
   // -------------------------------------------------------------------------
 
+  function todayKey() {
+    const d = new Date();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return d.getFullYear() + "-" + m + "-" + day;
+  }
+
+  function storageGet(key) {
+    try {
+      return localStorage.getItem(key) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function storageSet(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* private mode or blocked storage */
+    }
+  }
+
+  function storageRemove(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function readSessionToken() {
+    try {
+      return sessionStorage.getItem(TOKEN_KEY) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function clearSessionToken() {
+    try {
+      sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
   function getToken() {
-    return sessionStorage.getItem(TOKEN_KEY) || "";
+    const token = storageGet(TOKEN_KEY);
+    const day = storageGet(TOKEN_DAY_KEY);
+    if (token && day === todayKey()) return token;
+
+    // Saved token is from another day: ask again.
+    if (token || day) {
+      clearToken();
+      return "";
+    }
+
+    // Upgrade a token saved by the previous session-only build.
+    const sessionToken = readSessionToken();
+    if (sessionToken) {
+      setToken(sessionToken);
+      clearSessionToken();
+      return sessionToken;
+    }
+    return "";
   }
 
   function setToken(token) {
-    sessionStorage.setItem(TOKEN_KEY, token);
+    storageSet(TOKEN_KEY, token);
+    storageSet(TOKEN_DAY_KEY, todayKey());
   }
 
   function clearToken() {
-    sessionStorage.removeItem(TOKEN_KEY);
+    storageRemove(TOKEN_KEY);
+    storageRemove(TOKEN_DAY_KEY);
+    clearSessionToken();
   }
 
   function showAuth() {
     $("auth-screen").classList.remove("hidden");
     $("app-screen").classList.add("hidden");
+    const input = $("token-input");
+    if (input) input.value = "";
     stopRefresh();
   }
 
