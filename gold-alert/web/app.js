@@ -1,6 +1,7 @@
 /**
  * GOLD ALERT - Mobile web client
- * API Token is entered by user and stored in sessionStorage (never hardcoded).
+ * API Token is entered by the user (never hardcoded) and kept in localStorage
+ * until the next local calendar day.
  */
 
 (function () {
@@ -9,6 +10,7 @@
   const MAX_ALERTS = 11;
   const REFRESH_MS = 1000;
   const TOKEN_KEY = "gold_alert_api_token";
+  const TOKEN_DAY_KEY = "gold_alert_api_token_day";
 
   /** @type {Array<{id?: number|null, price: string, enabled: boolean, triggered: boolean}>} */
   let localAlerts = [];
@@ -25,21 +27,90 @@
   // Auth
   // -------------------------------------------------------------------------
 
+  function todayKey() {
+    const d = new Date();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return d.getFullYear() + "-" + m + "-" + day;
+  }
+
+  function storageGet(key) {
+    try {
+      return localStorage.getItem(key) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function storageSet(key, value) {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* private mode or blocked storage */
+    }
+  }
+
+  function storageRemove(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function readSessionToken() {
+    try {
+      return sessionStorage.getItem(TOKEN_KEY) || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function clearSessionToken() {
+    try {
+      sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
   function getToken() {
-    return sessionStorage.getItem(TOKEN_KEY) || "";
+    const token = storageGet(TOKEN_KEY);
+    const day = storageGet(TOKEN_DAY_KEY);
+    if (token && day === todayKey()) return token;
+
+    // Saved token is from another day: ask again.
+    if (token || day) {
+      clearToken();
+      return "";
+    }
+
+    // Upgrade a token saved by the previous session-only build.
+    const sessionToken = readSessionToken();
+    if (sessionToken) {
+      setToken(sessionToken);
+      clearSessionToken();
+      return sessionToken;
+    }
+    return "";
   }
 
   function setToken(token) {
-    sessionStorage.setItem(TOKEN_KEY, token);
+    storageSet(TOKEN_KEY, token);
+    storageSet(TOKEN_DAY_KEY, todayKey());
   }
 
   function clearToken() {
-    sessionStorage.removeItem(TOKEN_KEY);
+    storageRemove(TOKEN_KEY);
+    storageRemove(TOKEN_DAY_KEY);
+    clearSessionToken();
   }
 
   function showAuth() {
     $("auth-screen").classList.remove("hidden");
     $("app-screen").classList.add("hidden");
+    const input = $("token-input");
+    if (input) input.value = "";
     stopRefresh();
   }
 
@@ -175,9 +246,40 @@
     return localAlerts.filter((a) => a.enabled).length;
   }
 
+  function allDisarmed() {
+    return localAlerts.length > 0 && localAlerts.every((a) => !a.enabled);
+  }
+
+  function renderClearButton() {
+    const btn = $("btn-clear");
+    if (!btn) return;
+    const rearm = allDisarmed();
+    btn.textContent = rearm ? "再设定" : "清除";
+    btn.classList.toggle("rearm", rearm);
+    btn.disabled = localAlerts.length === 0;
+  }
+
+  function closestAlertIndex(alerts, price) {
+    let best = -1;
+    let bestDiff = Infinity;
+    let bestPrice = Infinity;
+    for (let i = 0; i < alerts.length; i++) {
+      const p = Number(alerts[i].price);
+      if (!Number.isFinite(p)) continue;
+      const diff = Math.abs(p - price);
+      if (diff < bestDiff - 1e-9 || (Math.abs(diff - bestDiff) <= 1e-9 && p < bestPrice)) {
+        bestDiff = diff;
+        bestPrice = p;
+        best = i;
+      }
+    }
+    return best;
+  }
+
   function renderAlerts() {
     const list = $("alerts-list");
     $("alerts-count").textContent = "触发 " + armCount() + " / " + localAlerts.length;
+    renderClearButton();
 
     if (localAlerts.length === 0) {
       list.innerHTML = '<li class="empty-hint">暂无提醒，点「设定」生成后选择要触发的价格</li>';
@@ -425,13 +527,9 @@
       return;
     }
 
-    const armed = payload.filter((a) => a.enabled).length;
-    if (payload.length > 0 && armed === 0) {
-      if (!confirm("没有点「触发」的价格，EA 不会提醒。仍要保存吗？")) return;
-    }
-
     try {
       $("btn-save").disabled = true;
+      $("btn-clear").disabled = true;
       const data = await api("/api/alerts", {
         method: "POST",
         body: JSON.stringify({ alerts: payload, step }),
@@ -446,6 +544,7 @@
       toast(e.message, "error");
     } finally {
       $("btn-save").disabled = false;
+      renderClearButton();
     }
   }
 
@@ -487,21 +586,104 @@
     }
   }
 
-  async function clearAll() {
-    if (!confirm("确定清除全部提醒？")) return;
-    localAlerts = [];
-    renderAlerts();
-    try {
-      const step = readStep();
-      const savedStep = Number.isFinite(step) && step > 0 ? step : 5;
-      setStepInput(savedStep);
-      await api("/api/alerts", {
-        method: "POST",
-        body: JSON.stringify({ alerts: [], step: savedStep }),
+  async function pushCurrentAlerts(successMessage) {
+    collectAlertsFromDom();
+    const step = readStep();
+    if (!Number.isFinite(step) || step <= 0) {
+      toast("间隔必须是大于 0 的数字", "error");
+      return false;
+    }
+
+    const payload = [];
+    for (const a of localAlerts) {
+      const p = Number(a.price);
+      if (!Number.isFinite(p) || p <= 0) {
+        toast("存在无效价格：" + a.price, "error");
+        return false;
+      }
+      payload.push({
+        price: p,
+        enabled: !!a.enabled,
+        triggered: a.enabled ? 0 : a.triggered ? 1 : 0,
       });
-      toast("已全部清除", "success");
+    }
+
+    if (payload.length > MAX_ALERTS) {
+      toast("最多 " + MAX_ALERTS + " 个提醒", "error");
+      return false;
+    }
+    if (payload.length === 0) {
+      toast("暂无提醒", "error");
+      return false;
+    }
+
+    const data = await api("/api/alerts", {
+      method: "POST",
+      body: JSON.stringify({ alerts: payload, step }),
+    });
+    localAlerts = mapAlerts(data.alerts);
+    alertsDirty = false;
+    renderAlerts();
+    setStepInput(step);
+    toast(successMessage, "success");
+    await refreshStatus();
+    return true;
+  }
+
+  async function clearOrRearm() {
+    collectAlertsFromDom();
+    if (localAlerts.length === 0) {
+      toast("暂无提醒", "error");
+      return;
+    }
+
+    const snapshot = localAlerts.map((a) => Object.assign({}, a));
+    const rearm = allDisarmed();
+    const btn = $("btn-clear");
+    btn.disabled = true;
+
+    try {
+      if (rearm) {
+        const status = await api("/api/status");
+        const price = Number(status.price);
+        if (!Number.isFinite(price)) {
+          toast("无法获取当前价格", "error");
+          return;
+        }
+        $("current-price").textContent = formatPrice(price);
+        const keepOff = closestAlertIndex(localAlerts, price);
+        if (keepOff < 0) {
+          toast("存在无效价格", "error");
+          return;
+        }
+        localAlerts.forEach((a, i) => {
+          a.enabled = i !== keepOff;
+          if (a.enabled) a.triggered = false;
+        });
+      } else {
+        localAlerts.forEach((a) => {
+          a.enabled = false;
+        });
+      }
+
+      alertsDirty = true;
+      renderAlerts();
+      btn.disabled = true;
+      const ok = await pushCurrentAlerts(
+        rearm ? "已重新设定，已同步到 EA" : "已取消全部触发，已同步到 EA"
+      );
+      if (!ok) {
+        localAlerts = snapshot;
+        alertsDirty = false;
+        renderAlerts();
+      }
     } catch (e) {
+      localAlerts = snapshot;
+      alertsDirty = false;
+      renderAlerts();
       toast(e.message, "error");
+    } finally {
+      renderClearButton();
     }
   }
 
@@ -522,7 +704,8 @@
     $("btn-save").addEventListener("click", saveAlerts);
     $("btn-auto").addEventListener("pointerdown", rememberStep);
     $("btn-auto").addEventListener("click", autoGenerate);
-    $("btn-clear").addEventListener("click", clearAll);
+    $("btn-clear").addEventListener("pointerdown", rememberStep);
+    $("btn-clear").addEventListener("click", clearOrRearm);
     $("step-input").addEventListener("change", rememberStep);
     $("btn-pause").addEventListener("click", togglePause);
     document.addEventListener("visibilitychange", function () {

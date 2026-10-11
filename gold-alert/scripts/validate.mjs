@@ -38,6 +38,28 @@ assert(p3[5].price === 3978 && p3[5].enabled === 0, `got ${p3[5].price}`);
 assert(p3[4].price === 3973, `got ${p3[4].price}`);
 assert(p3[6].price === 3983, `got ${p3[6].price}`);
 
+function closestAlertIndex(alerts, price) {
+  let best = -1;
+  let bestDiff = Infinity;
+  let bestPrice = Infinity;
+  for (let i = 0; i < alerts.length; i++) {
+    const p = Number(alerts[i].price);
+    if (!Number.isFinite(p)) continue;
+    const diff = Math.abs(p - price);
+    if (diff < bestDiff - 1e-9 || (Math.abs(diff - bestDiff) <= 1e-9 && p < bestPrice)) {
+      bestDiff = diff;
+      bestPrice = p;
+      best = i;
+    }
+  }
+  return best;
+}
+
+const levels = [4156, 4161, 4166, 4171, 4176, 4181, 4186, 4191, 4196, 4201, 4206].map((price) => ({ price }));
+assert(closestAlertIndex(levels, 4181.2) === 5, "closest to 4181.2 is 4181");
+assert(closestAlertIndex(levels, 4183.8) === 6, "4183.8 is closer to 4186");
+assert(closestAlertIndex(levels, 4183.5) === 5, "tie keeps the lower price");
+
 // Cross logic (mirror EA)
 function checkCross(prev, curr, ap, side) {
   // returns { fire: 'UP'|'DOWN'|null, side }

@@ -302,11 +302,23 @@ body {
 }
 
 .actions-save {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
   margin: 0 0 14px;
 }
 
-.actions-save .btn-block {
+.actions-save .btn {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
   margin-top: 0;
+}
+
+.btn-danger.rearm {
+  color: var(--gold);
+  border-color: rgba(212, 160, 23, 0.55);
+  background: rgba(212, 160, 23, 0.12);
 }
 
 .btn-primary {

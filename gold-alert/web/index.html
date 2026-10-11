@@ -7,17 +7,17 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#0a0a0a" />
   <title>GOLD ALERT</title>
-  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/style.css?v=15" />
 </head>
 <body>
   <!-- Token unlock screen (token never hardcoded) -->
   <div id="auth-screen" class="screen">
     <div class="auth-box">
       <h1 class="brand">GOLD ALERT</h1>
-      <p class="auth-hint">输入 API Token 解锁</p>
+      <p class="auth-hint">输入 API Token，当天只需一次</p>
       <input
         id="token-input"
-        type="password"
+        type="text"
         autocomplete="off"
         autocapitalize="off"
         spellcheck="false"
@@ -66,7 +66,8 @@
     </section>
 
     <section class="actions actions-save">
-      <button id="btn-save" class="btn btn-primary btn-block" type="button">保存设置</button>
+      <button id="btn-clear" class="btn btn-danger" type="button">清除</button>
+      <button id="btn-save" class="btn btn-primary" type="button">保存设置</button>
     </section>
 
     <section class="panel">
@@ -74,12 +75,11 @@
         <h2 class="panel-title">提醒价格</h2>
         <span id="alerts-count" class="count-badge">触发 0 / 11</span>
       </div>
-      <p class="panel-hint">设定后默认全部触发。不需要的点成「关闭」，再保存</p>
+      <p class="panel-hint">不需要的点成「关闭」再保存。清除会取消全部触发并同步给 EA</p>
       <ul id="alerts-list" class="alerts-list"></ul>
     </section>
 
     <section class="actions actions-bottom">
-      <button id="btn-clear" class="btn btn-danger" type="button">全部清除</button>
       <button id="btn-pause" class="btn btn-pause" type="button">暂停提醒</button>
     </section>
 
@@ -89,6 +89,6 @@
     </footer>
   </div>
 
-  <script src="/app.js?v=13"></script>
+  <script src="/app.js?v=15"></script>
 </body>
 </html>
