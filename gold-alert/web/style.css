@@ -67,6 +67,33 @@ body {
 }
 
 /* Brand */
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-lockup-auth {
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.brand-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.brand-icon-lg {
+  width: 88px;
+  height: 88px;
+  border-radius: 20px;
+}
+
 .brand {
   font-size: 28px;
   font-weight: 700;
