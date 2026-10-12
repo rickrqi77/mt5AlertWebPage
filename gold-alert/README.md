@@ -260,14 +260,11 @@ https://gold-alert.xxxxx.workers.dev
 
 ---
 
-## 九-B、网站设定 → OneDrive → EA（不经过 Cloudflare 轮询）
+## 九-B、手机网页读取价格和 EA 状态
 
-网页平时不刷新。只有点「设定」才读取 EA 写在 OneDrive 里的现价，生成提醒并写回。EA 只读本地文件。
+网页打开后持续请求 Cloudflare `GET /api/status`。当前价格、Bid、Ask 和 EA 在线/离线都来自这里，不读 OneDrive。
 
-- 说明与 Azure 应用注册：`https://alertdata.pages.dev/onedrive.html`
-- EA：`InpUseLocalFile = true`，Cloudflare 地址留空
-- 电脑运行一次：`scripts/link-onedrive-alerts.bat`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.08）
+EA 大约每 2 秒 `POST /api/ea/heartbeat`。超过约 15 秒没有新心跳，网页显示离线。
 
 ---
 
