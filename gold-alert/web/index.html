@@ -6,14 +6,20 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#0a0a0a" />
+  <meta name="apple-mobile-web-app-title" content="GOLD ALERT" />
   <title>GOLD ALERT</title>
+  <link rel="icon" href="/icon.jpg" type="image/jpeg" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
   <!-- Token unlock screen (token never hardcoded) -->
   <div id="auth-screen" class="screen">
     <div class="auth-box">
-      <h1 class="brand">GOLD ALERT</h1>
+      <div class="brand-lockup brand-lockup-auth">
+        <img src="/icon.jpg" alt="" class="brand-icon brand-icon-lg" />
+        <h1 class="brand">GOLD ALERT</h1>
+      </div>
       <p class="auth-hint">输入 API Token 解锁</p>
       <input
         id="token-input"
@@ -32,7 +38,10 @@
   <!-- Main app -->
   <div id="app-screen" class="screen hidden">
     <header class="header">
-      <h1 class="brand">GOLD ALERT</h1>
+      <div class="brand-lockup">
+        <img src="/icon.jpg" alt="" class="brand-icon" />
+        <h1 class="brand">GOLD ALERT</h1>
+      </div>
       <button id="btn-logout" class="btn-ghost" type="button" title="清除 Token">退出</button>
     </header>
 
