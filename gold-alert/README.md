@@ -265,7 +265,7 @@ https://gold-alert.xxxxx.workers.dev
 EA 每 3 秒向 Cloudflare 拉取已保存的提醒，不上传现价。网页打开时不取价格；点「刷新」才向 Swissquote 要一次现货价。设定和保存写入 Cloudflare。价格穿越后，EA 直接把消息发给 Telegram。
 
 - 手机网页：`https://alertdata.pages.dev/`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.12）
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.13）
 
 ---
 
@@ -341,7 +341,7 @@ https://api.telegram.org
 | `InpApiBaseUrl` | `https://alertdata.pages.dev` | **不要**末尾斜杠 |
 | `InpApiToken` | （你的 API Token） | 与 Cloudflare Secret 相同 |
 | `InpSymbol` | （留空） | 留空 = 使用当前图表品种 |
-| `InpSyncSeconds` | `3` | 每 3 秒拉取提醒，不上传价格。小于 3 会按 3 秒。图表上如果还留着旧的 `15`，改成 `3` |
+| `InpSyncSeconds` | `3` | 没有间隔文件时使用。小于 3 会按 3 秒。有 `gold-alert-interval.txt` 时以文件为准 |
 | `InpEnableTelegram` | `true` | 穿越后由 EA 直接发 Telegram |
 | `InpTelegramBotToken` | BotFather 给的 Token | |
 | `InpTelegramChatId` | 你的 Chat ID | |
@@ -349,12 +349,22 @@ https://api.telegram.org
 4. 勾选「允许算法交易」
 5. 确认 MT5 顶部「Algo Trading」按钮为 **绿色开启**
 
+### 11.4b 在电脑上改取提醒间隔
+
+EA 为 v1.13 并正在运行时，不用打开 MT5 参数。
+
+1. 下载并双击：`https://alertdata.pages.dev/set-alert-interval.bat`
+2. 输入秒数（3 到 3600），回车
+3. Experts 下次取提醒时出现 `Pull interval updated: Ns`
+
+文件写在 `%APPDATA%\MetaQuotes\Terminal\Common\Files\gold-alert-interval.txt`。删掉这个文件后，EA 回到图表参数 `InpSyncSeconds`。
+
 ### 11.5 查看日志
 
 打开 MT5 下方 **「专家」(Experts)** 标签，应看到类似：
 
 ```
-[GoldAlert] EA initialized v1.12
+[GoldAlert] EA initialized v1.13
 [GoldAlert] Pull alerts every 3s. Price is not uploaded.
 [GoldAlert] Symbol: XAUUSD
 [GoldAlert] API connected

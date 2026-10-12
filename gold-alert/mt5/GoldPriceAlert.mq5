@@ -6,8 +6,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.12"
-#property description "XAUUSD gold price alert EA. Pulls Cloudflare alerts every 3s. Does not upload price. Telegram sent by the EA."
+#property version   "1.13"
+#property description "XAUUSD gold price alert EA. Pulls Cloudflare alerts on a timer. Does not upload price. Telegram sent by the EA."
 
 //--- inputs
 input string InpApiBaseUrl      = "https://alertdata.pages.dev";      // Cloudflare site, no trailing slash
@@ -46,13 +46,17 @@ bool       g_loggedApiOk    = false;
 datetime   g_lastSyncTime   = 0;
 datetime   g_lastErrorLog   = 0;
 bool       g_filePaused     = false;
+int        g_syncSeconds    = 0;
+
+int  ResolveSyncSeconds();
+bool ApplySyncInterval(const bool startup);
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(LOG_PREFIX, "EA initialized v1.12");
+   Print(LOG_PREFIX, "EA initialized v1.13");
    if(InpEnableTelegram && StringLen(InpTelegramBotToken) > 0 && StringLen(InpTelegramChatId) > 0)
       Print(LOG_PREFIX, "Telegram: on (direct, not via Cloudflare)");
    else
@@ -76,14 +80,8 @@ int OnInit()
 
    ResetAlerts();
 
-   int syncSec = InpSyncSeconds;
-   if(syncSec < 3) syncSec = 3;
-   Print(LOG_PREFIX, "Pull alerts every ", syncSec, "s. Price is not uploaded.");
-   if(!EventSetTimer(syncSec))
-   {
-      Print(LOG_PREFIX, "ERROR: EventSetTimer failed");
+   if(!ApplySyncInterval(true))
       return(INIT_FAILED);
-   }
 
    // Immediate first sync
    SyncWithServer();
@@ -105,7 +103,66 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   ApplySyncInterval(false);
    SyncWithServer();
+}
+
+//+------------------------------------------------------------------+
+//| Interval: input, unless gold-alert-interval.txt overrides it     |
+//+------------------------------------------------------------------+
+int ClampSyncSeconds(const int sec)
+{
+   if(sec < 3) return 3;
+   if(sec > 3600) return 3600;
+   return sec;
+}
+
+int ReadIntervalFile()
+{
+   if(!FileIsExist("gold-alert-interval.txt", FILE_COMMON))
+      return -1;
+   int fh = FileOpen("gold-alert-interval.txt", FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_COMMON);
+   if(fh == INVALID_HANDLE)
+      return -1;
+   string line = FileReadString(fh);
+   FileClose(fh);
+   StringTrimLeft(line);
+   StringTrimRight(line);
+   if(StringLen(line) < 1)
+      return -1;
+   for(int i = 0; i < StringLen(line); i++)
+   {
+      int ch = StringGetCharacter(line, i);
+      if(ch < '0' || ch > '9')
+         return -1;
+   }
+   return ClampSyncSeconds((int)StringToInteger(line));
+}
+
+int ResolveSyncSeconds()
+{
+   int fromFile = ReadIntervalFile();
+   if(fromFile >= 3)
+      return fromFile;
+   return ClampSyncSeconds(InpSyncSeconds);
+}
+
+bool ApplySyncInterval(const bool startup)
+{
+   int sec = ResolveSyncSeconds();
+   if(!startup && sec == g_syncSeconds)
+      return true;
+   if(!EventSetTimer(sec))
+   {
+      Print(LOG_PREFIX, "ERROR: EventSetTimer failed");
+      return false;
+   }
+   g_syncSeconds = sec;
+   if(startup)
+      Print(LOG_PREFIX, "Pull alerts every ", sec, "s. Price is not uploaded.");
+   else
+      Print(LOG_PREFIX, "Pull interval updated: ", sec, "s");
+   return true;
 }
 
 //+------------------------------------------------------------------+
