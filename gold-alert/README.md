@@ -260,14 +260,14 @@ https://gold-alert.xxxxx.workers.dev
 
 ---
 
-## 九-B、不用网页：快捷指令 + OneDrive
+## 九-B、网站设定 → OneDrive → EA（不经过 Cloudflare 轮询）
 
-iPhone 快捷指令按现价和间隔生成 15 个提醒，存到 OneDrive，EA 读取后换价格。详细步骤：
+网页平时不刷新。只有点「设定」才读取 EA 写在 OneDrive 里的现价，生成提醒并写回。EA 只读本地文件。
 
-- 手机打开：`https://alertdata.pages.dev/onedrive.html`
-- EA：`InpUseLocalFile = true`（可留空 Cloudflare 地址）
+- 说明与 Azure 应用注册：`https://alertdata.pages.dev/onedrive.html`
+- EA：`InpUseLocalFile = true`，Cloudflare 地址留空
 - 电脑运行一次：`scripts/link-onedrive-alerts.bat`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.07，默认电脑不弹窗）
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.08）
 
 ---
 
