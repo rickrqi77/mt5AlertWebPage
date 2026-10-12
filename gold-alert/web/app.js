@@ -21,6 +21,7 @@
   let capturedStep = null;
   let alertsPaused = false;
   let alertsDirty = false;
+  let faceUnlocking = false;
 
   const $ = (id) => document.getElementById(id);
 
@@ -159,7 +160,8 @@
     $("app-screen").classList.add("hidden");
     $("token-panel").classList.add("hidden");
     $("face-panel").classList.remove("hidden");
-    $("auth-hint").textContent = "本机已记住 Token，用面容 ID 进入";
+    $("btn-faceid").classList.add("hidden");
+    $("auth-hint").textContent = "正在检查面容 ID…";
     hideAuthError();
   }
 
@@ -246,17 +248,34 @@
       setCredId(toB64url(cred.rawId));
     } catch (e) {
       if (e && e.name === "InvalidStateError") {
-        var assertion = await navigator.credentials.get({
-          publicKey: {
-            challenge: randomChallenge(),
-            rpId: location.hostname,
-            userVerification: "required",
-            timeout: 60000,
-          },
-        });
+        var assertion = await getAssertion("");
         if (!assertion) throw e;
         if (assertion.rawId) setCredId(toB64url(assertion.rawId));
         return;
+      }
+      throw e;
+    }
+  }
+
+  async function getAssertion(allowId) {
+    var publicKey = {
+      challenge: randomChallenge(),
+      rpId: location.hostname,
+      userVerification: "required",
+      timeout: 60000,
+    };
+    if (allowId) {
+      publicKey.allowCredentials = [
+        { type: "public-key", id: fromB64url(allowId), transports: ["internal"] },
+      ];
+    }
+    var opts = { publicKey: publicKey, mediation: "optional" };
+    try {
+      return await navigator.credentials.get(opts);
+    } catch (e) {
+      if (e && e.name === "TypeError") {
+        delete opts.mediation;
+        return await navigator.credentials.get(opts);
       }
       throw e;
     }
@@ -269,17 +288,7 @@
       return;
     }
     try {
-      var assertion = await navigator.credentials.get({
-        publicKey: {
-          challenge: randomChallenge(),
-          rpId: location.hostname,
-          allowCredentials: [
-            { type: "public-key", id: fromB64url(id), transports: ["internal"] },
-          ],
-          userVerification: "required",
-          timeout: 60000,
-        },
-      });
+      var assertion = await getAssertion(id);
       if (!assertion) throw new Error("未通过面容 ID");
     } catch (e) {
       if (e && e.name === "NotAllowedError") throw e;
@@ -305,13 +314,29 @@
     return (e && e.message) || "面容 ID 失败";
   }
 
-  async function unlockWithFaceId() {
+  function isFaceLockVisible() {
+    return (
+      !$("face-panel").classList.contains("hidden") &&
+      $("app-screen").classList.contains("hidden")
+    );
+  }
+
+  async function unlockWithFaceId(auto) {
+    if (faceUnlocking) return;
+    if (auto && !isFaceLockVisible()) return;
+    faceUnlocking = true;
     hideAuthError();
+    $("auth-hint").textContent = "正在检查面容 ID…";
+    if (auto) $("btn-faceid").classList.add("hidden");
     try {
       await verifyFaceId();
       enterApp();
     } catch (e) {
+      $("btn-faceid").classList.remove("hidden");
+      $("auth-hint").textContent = "未通过，点「面容 ID 解锁」再试";
       showAuthError(faceIdErrorMessage(e));
+    } finally {
+      faceUnlocking = false;
     }
   }
 
@@ -602,6 +627,10 @@
   }
 
   function onPageVisible() {
+    if (isFaceLockVisible()) {
+      unlockWithFaceId(true);
+      return;
+    }
     if (!getToken()) return;
     if ($("app-screen").classList.contains("hidden")) return;
     alertsDirty = false;
@@ -789,7 +818,7 @@
       if (e.key === "Enter") unlock();
     });
     $("btn-faceid").addEventListener("click", function () {
-      unlockWithFaceId();
+      unlockWithFaceId(false);
     });
     $("btn-reenter-token").addEventListener("click", function () {
       clearToken();
@@ -814,23 +843,20 @@
     window.addEventListener("pageshow", onPageVisible);
   }
 
-  async function init() {
+  function init() {
     bindEvents();
     const token = getToken();
     if (!token) {
       showTokenAuth();
       return;
     }
-    if (await canUseFaceId()) {
+    if (supportsWebAuthn()) {
       showFaceAuth();
+      unlockWithFaceId(true);
       return;
     }
     enterApp();
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  init();
 })();

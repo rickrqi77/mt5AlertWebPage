@@ -264,7 +264,7 @@ https://gold-alert.xxxxx.workers.dev
 
 1. Safari 打开：`https://alertdata.pages.dev/`
 2. **第一次**输入 **API Token**，点「解锁」，按提示登记面容 ID
-3. 以后再打开：本机不再输入 Token，用 **面容 ID** 进入（点「退出」或「重新输入 Token」才会清除）
+3. 以后再打开：本机不再输入 Token，**打开就会检查面容 ID**（点「退出」或「重新输入 Token」才会清除）
 3. 页面会显示：
    - **GOLD ALERT**
    - XAUUSD 当前价格（来自 EA 上传的 MT5 价格）
