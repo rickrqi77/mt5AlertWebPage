@@ -271,7 +271,7 @@ https://gold-alert.xxxxx.workers.dev
 - 说明与 Azure 应用注册：`https://alertdata.pages.dev/onedrive.html`
 - EA：`InpUseLocalFile = true`，Cloudflare 地址留空
 - 电脑运行一次：`scripts/link-onedrive-alerts.bat`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.08）
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.09，只写 OneDrive，不访问 Cloudflare）
 
 ---
 
@@ -289,7 +289,7 @@ https://gold-alert.xxxxx.workers.dev
 | 功能 | 说明 |
 |------|------|
 | 当前价格 | OneDrive `status.json` 里 EA 写下的 MT5 价格 |
-| EA 状态 | `status.json` 的时间超过约 45 秒 → 🔴 离线 |
+| EA 状态 | `status.json` 超过约 3 分钟没更新 → 🔴 离线 |
 | 自动生成 | 以当前整数价为中心，上下各 7 档 + 中间一档（最多 15 个），写入 `alerts.txt` |
 | 保存设置 | 写入 OneDrive `alerts.txt`，EA 读本地文件后同步 |
 | 全部清除 | 清空 `alerts.txt` |

@@ -10,6 +10,15 @@ echo Always keep this folder on this device in OneDrive:
 echo   %SRC%
 
 if exist "%DST%" (
+  fsutil reparsepoint query "%DST%" >nul 2>&1
+  if errorlevel 1 (
+    echo This folder is not linked to OneDrive:
+    echo   %DST%
+    echo The phone reads %SRC%\status.json
+    echo Close MT5, delete or rename the folder above, then run this script again.
+    pause
+    exit /b 1
+  )
   echo Link already exists:
   echo   %DST%
 ) else (

@@ -6,8 +6,8 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.08"
-#property description "XAUUSD gold price alert EA. Reads/writes OneDrive local files, no Cloudflare."
+#property version   "1.09"
+#property description "XAUUSD gold price alert EA. OneDrive files only. Does not call Cloudflare."
 
 //--- inputs
 input string InpApiBaseUrl      = "";                                 // Cloudflare URL, empty = do not use website
@@ -50,31 +50,22 @@ string     g_localFileSig   = "";
 bool       g_filePaused     = false;
 datetime   g_lastStatusWrite = 0;
 double     g_lastStatusMid   = 0.0;
+bool       g_loggedStatusOk  = false;
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(LOG_PREFIX, "EA initialized");
-
-   if(!InpUseLocalFile && !HasCloudApi())
-   {
-      Print(LOG_PREFIX, "ERROR: Enable InpUseLocalFile (OneDrive) or set InpApiBaseUrl + InpApiToken");
-      return(INIT_PARAMETERS_INCORRECT);
-   }
+   Print(LOG_PREFIX, "EA initialized v1.09");
+   Print(LOG_PREFIX, "Cloudflare: off");
 
    g_symbol = InpSymbol;
    if(StringLen(g_symbol) == 0)
       g_symbol = _Symbol;
 
    Print(LOG_PREFIX, "Symbol: ", g_symbol);
-   if(HasCloudApi())
-      Print(LOG_PREFIX, "API: ", InpApiBaseUrl);
-   else
-      Print(LOG_PREFIX, "API: off (OneDrive/local file mode)");
-   if(InpUseLocalFile)
-      Print(LOG_PREFIX, "Local file: Common\\Files\\", InpLocalFileName);
+   Print(LOG_PREFIX, "Local file: Common\\Files\\", InpLocalFileName);
    Print(LOG_PREFIX, "Sync interval: ", InpSyncSeconds, "s");
 
    if(!SymbolSelect(g_symbol, true))
@@ -278,19 +269,10 @@ void SyncWithServer()
    if(InpVerboseLog)
       Print(LOG_PREFIX, "Price: ", FormatPrice(mid), "  bid=", FormatPrice(bid), "  ask=", FormatPrice(ask));
 
-   if(InpUseLocalFile)
-   {
-      FolderCreate("gold-alert", FILE_COMMON);
-      LoadPausedFlag();
-      LoadLocalAlerts(mid);
-      MaybeWriteStatus(bid, ask, mid);
-   }
-   else if(HasCloudApi())
-   {
-      if(!PostHeartbeat(bid, ask, mid))
-         return;
-      FetchConfig(mid);
-   }
+   FolderCreate("gold-alert", FILE_COMMON);
+   LoadPausedFlag();
+   LoadLocalAlerts(mid);
+   MaybeWriteStatus(bid, ask, mid);
 
    g_lastSyncTime = TimeCurrent();
 }
@@ -318,10 +300,11 @@ void MaybeWriteStatus(const double bid, const double ask, const double mid)
    if(g_lastStatusWrite != 0 && (now - g_lastStatusWrite) < every && MathAbs(mid - g_lastStatusMid) < 0.05)
       return;
 
-   int fh = FileOpen("gold-alert\\status.json", FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_COMMON);
+   int fh = FileOpen("gold-alert\\status.json", FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_COMMON);
    if(fh == INVALID_HANDLE)
    {
-      LogErrorThrottled("ERROR: Cannot write status.json");
+      LogErrorThrottled("ERROR: Cannot write status.json. Error=" + IntegerToString(GetLastError()) +
+                        " | Link Common\\Files\\gold-alert to OneDrive\\gold-alert");
       return;
    }
    string json = "{";
@@ -335,6 +318,11 @@ void MaybeWriteStatus(const double bid, const double ask, const double mid)
    FileClose(fh);
    g_lastStatusWrite = now;
    g_lastStatusMid = mid;
+   if(!g_loggedStatusOk)
+   {
+      Print(LOG_PREFIX, "Wrote Common\\Files\\gold-alert\\status.json");
+      g_loggedStatusOk = true;
+   }
 }
 
 bool HasCloudApi()
@@ -353,8 +341,6 @@ void NotifyTrigger(const int alertId, const double price, const double triggerPr
    string msg = FormatPrice(triggerPrice) + " _ " + FormatPrice(price);
    if(InpMt5Popup)
       Alert(msg);
-   if(InpEnableTelegram && HasCloudApi())
-      SendTrigger(alertId, price, triggerPrice, direction);
 }
 
 string TrimLine(string s)

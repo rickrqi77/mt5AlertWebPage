@@ -12,7 +12,7 @@
   const CLIENT_ID_KEY = "gold_alert_azure_client_id";
   const GRAPH_SCOPES = ["User.Read", "Files.ReadWrite"];
   const OD_FOLDER = "gold-alert";
-  const EA_ONLINE_SECONDS = 45;
+  const EA_ONLINE_SECONDS = 180;
 
   /** @type {Array<{id?: number|null, price: string, enabled: boolean, triggered: boolean}>} */
   let localAlerts = [];
@@ -100,7 +100,7 @@
     }
   }
 
-  function renderEaStatus(online) {
+  function renderEaStatus(online, detail) {
     const el = $("ea-status");
     const text = $("ea-status-text");
     if (online) {
@@ -110,19 +110,36 @@
     } else {
       el.classList.add("offline");
       el.classList.remove("online");
-      text.textContent = "🔴 EA 离线";
+      text.textContent = detail ? "🔴 EA 离线 " + detail : "🔴 EA 离线";
     }
   }
 
-  function applyStatus(data) {
+  function ageSeconds(msOrSec, isMs) {
+    var n = Number(msOrSec);
+    if (!Number.isFinite(n)) return null;
+    var sec = isMs ? n / 1000 : n;
+    return Date.now() / 1000 - sec;
+  }
+
+  function isFresh(age) {
+    return age != null && age <= EA_ONLINE_SECONDS && age >= -120;
+  }
+
+  function applyStatus(data, fileModifiedMs) {
     if (!data) return;
     $("symbol").textContent = data.symbol || "XAUUSD";
     $("current-price").textContent = formatPrice(data.price);
     $("bid").textContent = formatPrice(data.bid);
     $("ask").textContent = formatPrice(data.ask);
-    var ts = Number(data.ts);
-    var online = Number.isFinite(ts) && Math.abs(Date.now() / 1000 - ts) <= EA_ONLINE_SECONDS;
-    renderEaStatus(online);
+    var fileAge = ageSeconds(fileModifiedMs, true);
+    var tsAge = ageSeconds(Number(data.ts), false);
+    var online = isFresh(fileAge) || isFresh(tsAge);
+    var detail = "";
+    if (!online) {
+      var age = fileAge != null ? fileAge : tsAge;
+      detail = age == null ? "无时间" : Math.round(Math.abs(age)) + "秒前";
+    }
+    renderEaStatus(online, detail);
     $("last-refresh").textContent =
       "取价 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
   }
@@ -382,6 +399,17 @@
     return await res.text();
   }
 
+  async function graphGetItem(name, allowPopup) {
+    await getGraphToken(allowPopup);
+    var res = await fetch(
+      "https://graph.microsoft.com/v1.0/me/drive/root:/" + OD_FOLDER + "/" + name,
+      { headers: graphHeaders() }
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error("读取 " + name + " 失败 (" + res.status + ")");
+    return await res.json();
+  }
+
   async function graphPutText(name, text) {
     await getGraphToken();
     await ensureFolder();
@@ -402,14 +430,19 @@
 
   async function refreshStatusFromDrive() {
     try {
-      var raw = await graphGetText("status.json", false);
-      if (!raw) {
-        renderEaStatus(false);
+      var item = await graphGetItem("status.json", false);
+      if (!item) {
+        renderEaStatus(false, "没有 status.json");
         return;
       }
-      applyStatus(JSON.parse(raw));
+      var raw = await graphGetText("status.json", false);
+      if (!raw) {
+        renderEaStatus(false, "没有 status.json");
+        return;
+      }
+      applyStatus(JSON.parse(raw), Date.parse(item.lastModifiedDateTime));
     } catch (e) {
-      /* Keep the last price. The next tick retries without a login popup. */
+      renderEaStatus(false, e.message || "读不到状态");
     }
   }
 
@@ -472,16 +505,18 @@
     setStepInput(step);
     $("btn-auto").disabled = true;
     try {
+      var item = await graphGetItem("status.json");
+      if (!item) throw new Error("还没有现价。请先让电脑 EA 运行，并确认 OneDrive\\gold-alert\\status.json 已同步");
       var raw = await graphGetText("status.json");
-      if (!raw) throw new Error("还没有现价。请先让电脑 EA 运行并同步 OneDrive");
+      if (!raw) throw new Error("还没有现价。请先让电脑 EA 运行，并确认 OneDrive\\gold-alert\\status.json 已同步");
       var status = JSON.parse(raw);
       var price = Number(status.price);
       if (!Number.isFinite(price) || price <= 0) throw new Error("现价无效");
-      applyStatus(status);
-      if (
-        status.ts &&
-        Math.abs(Date.now() / 1000 - Number(status.ts)) > EA_ONLINE_SECONDS
-      ) {
+      var modified = Date.parse(item.lastModifiedDateTime);
+      applyStatus(status, modified);
+      var fileAge = ageSeconds(modified, true);
+      var tsAge = ageSeconds(Number(status.ts), false);
+      if (!isFresh(fileAge) && !isFresh(tsAge)) {
         toast("EA 现价较旧，请确认电脑在线后再设定", "error");
         return;
       }
