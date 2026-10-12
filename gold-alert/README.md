@@ -271,7 +271,7 @@ https://gold-alert.xxxxx.workers.dev
 - 说明与 Azure 应用注册：`https://alertdata.pages.dev/onedrive.html`
 - EA：`InpUseLocalFile = true`，Cloudflare 地址留空
 - 电脑运行一次：`scripts/link-onedrive-alerts.bat`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.09，只写 OneDrive，不访问 Cloudflare）
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.10，OneDrive 文件；触发后可由 EA 直接发 Telegram）
 
 ---
 

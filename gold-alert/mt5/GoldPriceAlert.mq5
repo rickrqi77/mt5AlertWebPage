@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.09"
+#property version   "1.10"
 #property description "XAUUSD gold price alert EA. OneDrive files only. Does not call Cloudflare."
 
 //--- inputs
@@ -17,7 +17,9 @@ input int    InpSyncSeconds     = 2;                                  // Read al
 input int    InpStatusWriteSeconds = 15;                              // Write status.json for the phone (seconds)
 input bool   InpUseLocalFile    = true;                               // Read alerts from OneDrive/Common Files
 input string InpLocalFileName   = "gold-alert\\alerts.txt";           // Relative to Common\\Files
-input bool   InpEnableTelegram  = false;                              // Telegram via Cloudflare (leave off)
+input bool   InpEnableTelegram  = false;                              // true = send Telegram when a price is crossed
+input string InpTelegramBotToken = "";                                // Bot token from BotFather
+input string InpTelegramChatId   = "";                                // Your Telegram chat id
 input bool   InpMt5Popup        = false;                              // true = MT5 popup on the PC (usually leave off)
 input bool   InpVerboseLog      = false;                              // true = log every heartbeat/price (fills Experts log)
 
@@ -57,8 +59,12 @@ bool       g_loggedStatusOk  = false;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(LOG_PREFIX, "EA initialized v1.09");
+   Print(LOG_PREFIX, "EA initialized v1.10");
    Print(LOG_PREFIX, "Cloudflare: off");
+   if(InpEnableTelegram && StringLen(InpTelegramBotToken) > 0 && StringLen(InpTelegramChatId) > 0)
+      Print(LOG_PREFIX, "Telegram: on");
+   else
+      Print(LOG_PREFIX, "Telegram: off");
 
    g_symbol = InpSymbol;
    if(StringLen(g_symbol) == 0)
@@ -341,6 +347,46 @@ void NotifyTrigger(const int alertId, const double price, const double triggerPr
    string msg = FormatPrice(triggerPrice) + " _ " + FormatPrice(price);
    if(InpMt5Popup)
       Alert(msg);
+   SendTelegram(msg);
+}
+
+void SendTelegram(const string text)
+{
+   if(!InpEnableTelegram)
+      return;
+   if(StringLen(InpTelegramBotToken) < 10 || StringLen(InpTelegramChatId) < 1)
+   {
+      LogErrorThrottled("ERROR: Telegram is on but Bot Token or Chat ID is empty");
+      return;
+   }
+
+   string url = "https://api.telegram.org/bot" + InpTelegramBotToken + "/sendMessage";
+   string body = "{\"chat_id\":\"" + InpTelegramChatId + "\",\"text\":\"" + text + "\",\"disable_web_page_preview\":true}";
+
+   char post[];
+   char result[];
+   string resultHeaders = "";
+   int n = StringToCharArray(body, post, 0, WHOLE_ARRAY, CP_UTF8);
+   if(n > 0)
+      ArrayResize(post, n - 1);
+
+   ResetLastError();
+   int code = WebRequest("POST", url, "Content-Type: application/json\r\n", HTTP_TIMEOUT_MS, post, result, resultHeaders);
+   int err = GetLastError();
+   if(code == -1)
+   {
+      string msg = "ERROR: Telegram WebRequest failed. Error=" + IntegerToString(err);
+      if(err == 4060)
+         msg += " | Add https://api.telegram.org in Tools - Options - Expert Advisors - Allow WebRequest";
+      Print(LOG_PREFIX, msg);
+      return;
+   }
+   if(code < 200 || code >= 300)
+   {
+      Print(LOG_PREFIX, "ERROR: Telegram HTTP ", code, " ", CharArrayToString(result, 0, 180, CP_UTF8));
+      return;
+   }
+   Print(LOG_PREFIX, "Telegram sent");
 }
 
 string TrimLine(string s)
