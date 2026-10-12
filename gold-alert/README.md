@@ -262,10 +262,10 @@ https://gold-alert.xxxxx.workers.dev
 
 ## 九-B、网页和 EA 都走 Cloudflare，触发后 EA 直接发 Telegram
 
-EA 每 3 秒向 Cloudflare 拉取已保存的提醒，不上传现价。网页打开时不取价格；点「刷新」才向 Swissquote 要一次现货价。设定和保存写入 Cloudflare。价格穿越后，EA 直接把消息发给 Telegram。
+EA 按间隔向 Cloudflare 发 **一次** 请求：带上最新价格、哪些提醒还在触发，并在同一次响应里取回已保存的提醒。网页没有「刷新」按钮。页面打开时，按这个间隔读取 EA 刚写入的价格和使用情况。设定和保存写入 Cloudflare。价格穿越后，EA 直接把消息发给 Telegram。
 
 - 手机网页：`https://alertdata.pages.dev/`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.14）
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.15）
 
 ---
 
@@ -273,22 +273,22 @@ EA 每 3 秒向 Cloudflare 拉取已保存的提醒，不上传现价。网页�
 
 1. Safari 打开：`https://alertdata.pages.dev/`
 2. **第一次**输入 **API Token**，点「解锁」
-3. 点价格右边的「刷新」，向 Swissquote 取一次现货价。打开页面时不会自动取价
-4. 设置间隔（例如 `5`），点「设定」生成价格
-5. 点「保存设置」，提醒写入 Cloudflare，EA 约 3 秒内取回
+3. 页面按 EA 的间隔显示最新价格。已触发过的提醒显示「已用」。没有「刷新」按钮
+4. 设置间隔（例如 `5`），点「设定」按当前 EA 价格生成提醒
+5. 点「保存设置」，提醒写入 Cloudflare，EA 下次同步时取回
 
 ### 功能说明
 
 | 功能 | 说明 |
 |------|------|
-| 当前价格 | 打开页面时是 `--`。点「刷新」后显示 Swissquote 现货价 |
-| 刷新 | 点一次，向 Swissquote 取一笔现货价，并请 EA 在下次取提醒时回报一次哪些提醒已经用过。页面约 5 秒后取回这一次。不再点刷新，EA 就不再回报 |
-| 自动生成 | 以当前现货价的整数为中心，上下各 7 档 + 中间一档（最多 15 个），写入 Cloudflare |
-| 保存设置 | 写入 Cloudflare，EA 约 3 秒内取回 |
+| 当前价格 | EA 每次同步写入的最新价。页面打开时按同样间隔更新。还没有价格时显示 `--` |
+| 已用 | EA 在同一次同步里报上哪些提醒已经触发。页面上按钮变成「已用」 |
+| 自动生成 | 以当前 EA 价格的整数为中心，上下各 7 档 + 中间一档（最多 15 个），写入 Cloudflare |
+| 保存设置 | 写入 Cloudflare，EA 下次同步时取回 |
 | 全部清除 | 删除 Cloudflare 上的全部提醒 |
 | 触发通知 | EA 发现穿越后直接发 Telegram，不经过 Cloudflare |
 
-> 网页关闭后，EA **继续工作**。重新打开网页会从 Cloudflare 读取最新价格和提醒。
+> 网页关掉或切到后台后，页面不再读取。EA **继续**按间隔做那一次同步。重新打开网页会读到 EA 刚写入的价格和提醒。
 
 ---
 
@@ -351,7 +351,7 @@ https://api.telegram.org
 
 ### 11.4b 在电脑上改取提醒间隔
 
-EA 为 v1.14 并正在运行时，不用打开 MT5 参数。
+EA 为 v1.15 并正在运行时，不用打开 MT5 参数。
 
 1. 下载并双击：`https://alertdata.pages.dev/set-alert-interval.bat`
 2. 输入秒数（3 到 3600），回车
@@ -364,8 +364,8 @@ EA 为 v1.14 并正在运行时，不用打开 MT5 参数。
 打开 MT5 下方 **「专家」(Experts)** 标签，应看到类似：
 
 ```
-[GoldAlert] EA initialized v1.14
-[GoldAlert] Pull alerts every 3s. Price is not uploaded.
+[GoldAlert] EA initialized v1.15
+[GoldAlert] Sync every 3s: price, usage, and alerts in one request.
 [GoldAlert] Symbol: XAUUSD
 [GoldAlert] API connected
 [GoldAlert] Config version: 1
@@ -406,13 +406,14 @@ Authorization: Bearer <API_TOKEN>
 
 | 方法 | 路径 | 用途 |
 |------|------|------|
-| GET | `/api/status` | 当前价格、EA 在线状态 |
+| POST | `/api/ea/sync` | EA 的唯一周期请求：上报价格和使用情况，响应里带回已保存的提醒 |
+| GET | `/api/status` | 网页打开时读取 EA 刚写入的价格、提醒和使用情况 |
 | GET | `/api/alerts` | 提醒列表 |
 | POST | `/api/alerts` | 保存提醒（最多 15） |
 | DELETE | `/api/alerts/:id` | 删除单个提醒 |
 | POST | `/api/alerts/auto` | 按当前 EA 价格自动生成 ±7 档 |
-| POST | `/api/ea/heartbeat` | EA 心跳 + 上传价格 |
-| GET | `/api/config` | EA 拉取提醒配置（含 version） |
+| POST | `/api/ea/heartbeat` | 旧接口。当前 EA 不调用 |
+| GET | `/api/config` | 旧接口。内容和同步响应相同，当前 EA 不单独请求 |
 | POST | `/api/alert-trigger` | 保留接口。当前 EA 不调用，Telegram 由 EA 直发 |
 | GET/POST | `/api/settings` | 间隔等设置 |
 
@@ -452,18 +453,18 @@ Telegram 消息示例：
 
 | # | 测试 | 期望结果 |
 |---|------|----------|
-| 1 | EA 挂载并联网 | Experts 出现 `Pull alerts every 3s` 和 `API connected` |
-| 2 | 手机添加 `4000` 并保存 | EA 约 3 秒内日志出现 Loaded，含 4000 |
-| 3 | 点「设定」 | 生成 15 个价格 |
+| 1 | EA 挂载并联网 | Experts 出现 `Sync every 3s: price, usage, and alerts in one request.` 和 `API connected` |
+| 2 | 手机添加 `4000` 并保存 | EA 下次同步日志出现 Loaded，含 4000 |
+| 3 | 点「设定」 | 按 EA 价格生成 15 个价格 |
 | 4 | 间隔改为 `10` 再生成 | 间隔为 10 |
-| 5 | 删除一个价格并保存 | EA 约 3 秒内同步 |
+| 5 | 删除一个价格并保存 | EA 下次同步取回 |
 | 6 | 价格向上穿越 | Telegram 收到 `提醒价 _ 现价`，Experts 出现 ALERT UP |
 | 7 | 价格向下穿越 | Telegram 收到 `提醒价 _ 现价`，Experts 出现 ALERT DOWN |
 | 8 | 同侧持续波动 | **不**重复发送 |
 | 9 | 重新穿越 | 可再次提醒 |
-| 10 | 关闭手机网页 | EA 仍继续工作 |
-| 11 | 点「刷新」 | 价格变成 Swissquote 现货价 |
-| 12 | 关掉网页再打开 | 价格回到 `--`，已保存的提醒还在 |
+| 10 | 关闭手机网页 | 页面停止读取。EA 仍继续那一次同步 |
+| 11 | 打开网页 | 没有「刷新」按钮。价格是 EA 上报的价，已触发的提醒显示「已用」 |
+| 12 | 关掉网页再打开 | 仍显示 EA 最新价格，已保存的提醒还在 |
 
 ---
 
@@ -479,7 +480,7 @@ Telegram 消息示例：
 
 ### Q: 怎么确认 EA 在取提醒？
 
-网页不再显示在线或离线。看 MT5 Experts：应有 `EA initialized v1.12`、`Pull alerts every 3s`、`API connected`。保存提醒后约 3 秒出现新的 `Loaded`。
+网页不再显示在线或离线。看 MT5 Experts：应有 `EA initialized v1.15`、`Sync every 3s: price, usage, and alerts in one request.`、`API connected`。保存提醒后下次同步出现新的 `Loaded`。
 
 ### Q: 收不到 Telegram
 

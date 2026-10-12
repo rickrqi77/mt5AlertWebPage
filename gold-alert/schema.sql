@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS system_status (
   updated_at TEXT,
   config_version INTEGER NOT NULL DEFAULT 1,
   usage_request INTEGER NOT NULL DEFAULT 0,
-  usage_reported INTEGER NOT NULL DEFAULT 0
+  usage_reported INTEGER NOT NULL DEFAULT 0,
+  sync_seconds INTEGER NOT NULL DEFAULT 3
 );
 
 CREATE TABLE IF NOT EXISTS settings (

@@ -20,7 +20,8 @@
   let warmupPromise = null;
   let dataReady = false;
   let spotPrice = null;
-  let usageTimer = null;
+  let pollTimer = null;
+  let pollMs = 3000;
 
   const $ = (id) => document.getElementById(id);
 
@@ -125,6 +126,7 @@
   }
 
   function showTokenAuth() {
+    stopPoll();
     $("auth-screen").classList.remove("hidden");
     $("app-screen").classList.add("hidden");
     $("auth-hint").textContent = "新设备输入一次 Token，本机以后不用再输入";
@@ -155,12 +157,13 @@
     }
 
     setToken(token);
+    showApp();
     await warmupData();
     if (!getToken()) {
       showAuthError("Token 无效");
       return;
     }
-    showApp();
+    startPoll();
   }
 
   // -------------------------------------------------------------------------
@@ -367,51 +370,56 @@
     return data;
   }
 
-  async function refreshSpot() {
-    const btn = $("btn-spot");
-    btn.disabled = true;
-    try {
-      const data = await api("/api/spot");
-      spotPrice = Number(data.price);
+  async function loadLive() {
+    const data = await api("/api/status");
+    $("symbol").textContent = data.symbol || "XAUUSD";
+    const price = Number(data.price);
+    if (Number.isFinite(price) && price > 0) {
+      spotPrice = price;
       showQuote(data);
-      $("price-label").textContent = "当前价格";
-      $("last-refresh").textContent =
-        "刷新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
-      if (data.usage_request) scheduleUsageOnce(data.usage_request);
-      return Number.isFinite(spotPrice) && spotPrice > 0;
-    } catch (e) {
-      toast(e.message || "现货价格暂时取不到", "error");
-      return false;
-    } finally {
-      btn.disabled = false;
     }
-  }
-
-  function scheduleUsageOnce(requestId) {
-    if (usageTimer) clearTimeout(usageTimer);
-    usageTimer = setTimeout(function () {
-      usageTimer = null;
-      loadUsageOnce(requestId);
-    }, 5000);
-  }
-
-  async function loadUsageOnce(requestId) {
-    if (!requestId || !canReloadAlertsFromServer()) return;
-    try {
-      const data = await api("/api/alerts");
-      if (Number(data.usage_reported) !== Number(requestId)) return;
+    alertsPaused = !!data.paused || data.alerts_enabled === false;
+    renderPauseButton();
+    if (!stepHydrated && data.step != null) {
+      setStepInput(data.step);
+      stepHydrated = true;
+    }
+    const sec = Number(data.sync_seconds);
+    if (Number.isInteger(sec) && sec >= 3 && sec <= 3600 && sec * 1000 !== pollMs) {
+      pollMs = sec * 1000;
+      if (pollTimer) startPoll();
+    }
+    if (canReloadAlertsFromServer() && Array.isArray(data.alerts)) {
       const next = mapAlerts(data.alerts);
-      if (alertsFingerprint(next) === alertsFingerprint(localAlerts)) return;
-      localAlerts = next;
-      alertsDirty = false;
-      renderAlerts();
-      toast("已更新提醒使用情况", "success");
-    } catch (e) {
-      if (e.message === "Unauthorized") {
-        clearToken();
-        showTokenAuth();
+      if (alertsFingerprint(next) !== alertsFingerprint(localAlerts)) {
+        localAlerts = next;
+        alertsDirty = false;
+        renderAlerts();
       }
     }
+    $("last-refresh").textContent =
+      "更新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    return data;
+  }
+
+  function stopPoll() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function startPoll() {
+    stopPoll();
+    pollTimer = setInterval(function () {
+      loadLive().catch(function (e) {
+        if (e && e.message === "Unauthorized") {
+          stopPoll();
+          clearToken();
+          showTokenAuth();
+        }
+      });
+    }, pollMs);
   }
 
   async function loadAlerts(opts) {
@@ -434,12 +442,7 @@
 
   async function refreshAll() {
     try {
-      await Promise.all([
-        loadSettings(),
-        canReloadAlertsFromServer()
-          ? loadAlerts({ skipIfUnchanged: true })
-          : Promise.resolve(),
-      ]);
+      await loadLive();
       dataReady = true;
     } catch (e) {
       if (e.message === "Unauthorized") {
@@ -463,14 +466,22 @@
 
   function startWarmupAndPoll() {
     if (!getToken()) return;
-    warmupData();
+    warmupData().finally(function () {
+      if (getToken() && document.visibilityState !== "hidden") startPoll();
+    });
   }
 
   function onPageVisible() {
     if (!getToken()) return;
+    if (document.visibilityState === "hidden") {
+      stopPoll();
+      return;
+    }
     if ($("app-screen").classList.contains("hidden")) return;
     alertsDirty = false;
-    warmupData();
+    warmupData().finally(function () {
+      if (getToken()) startPoll();
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -565,7 +576,7 @@
       alertsDirty = false;
       renderAlerts();
       setStepInput(step);
-      toast("设置已保存，EA 约 3 秒内取回", "success");
+      toast("设置已保存，EA 下次同步时取回", "success");
     } catch (e) {
       toast(e.message, "error");
     } finally {
@@ -584,8 +595,8 @@
     try {
       $("btn-auto").disabled = true;
       if (!Number.isFinite(spotPrice) || spotPrice <= 0) {
-        const ok = await refreshSpot();
-        if (!ok) return;
+        toast("还没有 EA 价格", "error");
+        return;
       }
 
       const data = await api("/api/alerts/auto", {
@@ -643,10 +654,7 @@
     $("btn-clear").addEventListener("click", clearAll);
     $("step-input").addEventListener("change", rememberStep);
     $("btn-pause").addEventListener("click", togglePause);
-    $("btn-spot").addEventListener("click", refreshSpot);
-    document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible") onPageVisible();
-    });
+    document.addEventListener("visibilitychange", onPageVisible);
     window.addEventListener("pageshow", onPageVisible);
   }
 

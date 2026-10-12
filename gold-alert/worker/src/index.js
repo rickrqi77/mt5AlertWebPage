@@ -14,6 +14,23 @@ const SWISSQUOTE_XAU_URL =
   "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAU/USD";
 
 let usageColumnsReady = false;
+let syncSecondsReady = false;
+
+async function ensureSyncSecondsColumn(env) {
+  if (syncSecondsReady) return;
+  try {
+    await env.DB.prepare("SELECT sync_seconds FROM system_status WHERE id = 1").first();
+  } catch {
+    try {
+      await env.DB.prepare(
+        "ALTER TABLE system_status ADD COLUMN sync_seconds INTEGER NOT NULL DEFAULT 3"
+      ).run();
+    } catch {
+      /* column already exists */
+    }
+  }
+  syncSecondsReady = true;
+}
 
 async function ensureUsageColumns(env) {
   if (usageColumnsReady) return;
@@ -106,6 +123,9 @@ async function handleApi(request, env, url) {
   if (method === "POST" && path === "/api/ea/heartbeat") {
     return await eaHeartbeat(request, env);
   }
+  if (method === "POST" && path === "/api/ea/sync") {
+    return await eaSync(request, env);
+  }
   if (method === "GET" && path === "/api/config") {
     return await getConfig(env);
   }
@@ -165,11 +185,15 @@ function checkAuth(request, env) {
 // ---------------------------------------------------------------------------
 
 async function getStatus(env) {
+  await ensureSyncSecondsColumn(env);
   const status = await env.DB.prepare("SELECT * FROM system_status WHERE id = 1").first();
   const settings = await env.DB.prepare(
     "SELECT step, telegram_enabled, alerts_enabled FROM settings WHERE id = 1"
   ).first();
   const countRow = await env.DB.prepare("SELECT COUNT(*) AS c FROM alerts").first();
+  const { results } = await env.DB.prepare(
+    "SELECT id, price, enabled, triggered, last_trigger_direction, last_trigger_time, created_at, updated_at FROM alerts ORDER BY price ASC"
+  ).all();
 
   const lastSeen = status?.last_seen || null;
   const eaOnline = isEaOnline(lastSeen);
@@ -182,11 +206,13 @@ async function getStatus(env) {
     ea_online: eaOnline,
     last_seen: lastSeen,
     alerts_count: countRow?.c ?? 0,
+    alerts: results || [],
     step: settings?.step ?? 5,
     telegram_enabled: !!(settings?.telegram_enabled),
     alerts_enabled: settings?.alerts_enabled === 0 ? false : true,
     paused: settings?.alerts_enabled === 0,
     config_version: status?.config_version ?? 1,
+    sync_seconds: status?.sync_seconds || 3,
   });
 }
 
@@ -428,7 +454,7 @@ async function autoGenerateAlerts(request, env) {
   const settings = await env.DB.prepare("SELECT step FROM settings WHERE id = 1").first();
   const currentPrice = Number(body.price);
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
-    return json({ error: "请先刷新现货价格" }, 400);
+    return json({ error: "还没有 EA 价格" }, 400);
   }
 
   let step = body.step != null ? Number(body.step) : Number(settings?.step ?? 5);
@@ -519,6 +545,105 @@ async function eaHeartbeat(request, env) {
     config_version: status?.config_version ?? 1,
     server_time: now,
   });
+}
+
+async function eaSync(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const bid = Number(body.bid);
+  const ask = Number(body.ask);
+  const price = Number(body.price);
+  const version = Number(body.version);
+  const symbol = String(body.symbol || "XAUUSD").slice(0, 32);
+  const now = new Date().toISOString();
+  const interval = Number(body.interval);
+  const syncSeconds = Number.isInteger(interval) && interval >= 3 && interval <= 3600 ? interval : null;
+  await ensureSyncSecondsColumn(env);
+
+  if (Number.isFinite(price) && price > 0) {
+    if (syncSeconds != null) {
+      await env.DB.prepare(
+        `UPDATE system_status SET
+          symbol = ?,
+          price = ?,
+          bid = ?,
+          ask = ?,
+          ea_online = 1,
+          last_seen = ?,
+          updated_at = ?,
+          sync_seconds = ?
+         WHERE id = 1`
+      )
+        .bind(
+          symbol,
+          price,
+          Number.isFinite(bid) ? bid : price,
+          Number.isFinite(ask) ? ask : price,
+          now,
+          now,
+          syncSeconds
+        )
+        .run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE system_status SET
+          symbol = ?,
+          price = ?,
+          bid = ?,
+          ask = ?,
+          ea_online = 1,
+          last_seen = ?,
+          updated_at = ?
+         WHERE id = 1`
+      )
+        .bind(
+          symbol,
+          price,
+          Number.isFinite(bid) ? bid : price,
+          Number.isFinite(ask) ? ask : price,
+          now,
+          now
+        )
+        .run();
+    }
+  }
+
+  const status = await env.DB.prepare(
+    "SELECT config_version FROM system_status WHERE id = 1"
+  ).first();
+  const currentVersion = status?.config_version ?? 1;
+  if (Number.isInteger(version) && version === currentVersion && Array.isArray(body.alerts)) {
+    const { results } = await env.DB.prepare(
+      "SELECT id, enabled, triggered FROM alerts"
+    ).all();
+    const byId = new Map((results || []).map((row) => [row.id, row]));
+    const statements = [];
+    for (const item of body.alerts) {
+      const id = Number(item.id);
+      const existing = byId.get(id);
+      if (!existing) continue;
+      const enabled = item.enabled === true || item.enabled === 1;
+      const wasEnabled = existing.enabled === 1 || existing.enabled === true;
+      const triggered = !enabled && wasEnabled ? 1 : enabled ? 0 : existing.triggered ? 1 : 0;
+      const nextEnabled = enabled ? 1 : 0;
+      const prevEnabled = wasEnabled ? 1 : 0;
+      const prevTriggered = existing.triggered ? 1 : 0;
+      if (nextEnabled === prevEnabled && triggered === prevTriggered) continue;
+      statements.push(
+        env.DB.prepare(
+          "UPDATE alerts SET enabled = ?, triggered = ?, updated_at = datetime('now') WHERE id = ?"
+        ).bind(nextEnabled, triggered, id)
+      );
+    }
+    if (statements.length > 0) await env.DB.batch(statements);
+  }
+
+  return await getConfig(env);
 }
 
 async function getConfig(env) {

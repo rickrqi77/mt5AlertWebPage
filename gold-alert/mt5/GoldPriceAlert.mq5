@@ -1,19 +1,20 @@
 //+------------------------------------------------------------------+
 //|                                              GoldPriceAlert.mq5  |
 //|                     XAUUSD Gold Price Alert System for MT5       |
-//|  Pulls saved alerts from Cloudflare every 3s. Does not upload    |
-//|  price. Sends Telegram directly when a price is crossed.        |
+//|  One Cloudflare request each interval: send the latest price and |
+//|  which alerts are still armed, and receive the saved alerts.    |
+//|  Sends Telegram directly when a price is crossed.               |
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.14"
-#property description "XAUUSD gold price alert EA. Pulls Cloudflare alerts on a timer. Does not upload price. Telegram sent by the EA."
+#property version   "1.15"
+#property description "XAUUSD gold price alert EA. One request sends price and alert usage, and receives saved alerts. Telegram sent by the EA."
 
 //--- inputs
 input string InpApiBaseUrl      = "https://alertdata.pages.dev";      // Cloudflare site, no trailing slash
 input string InpApiToken        = "";                                 // API Token (same as Worker secret API_TOKEN)
 input string InpSymbol          = "";                                 // Empty = chart symbol
-input int    InpSyncSeconds     = 3;                                  // Pull saved alerts (seconds, minimum 3). Does not upload price.
+input int    InpSyncSeconds     = 3;                                  // One sync request (seconds, 3-3600). Sends price and usage, receives alerts.
 input bool   InpEnableTelegram  = false;                              // true = send Telegram when a price is crossed
 input string InpTelegramBotToken = "";                                // Bot token from BotFather
 input string InpTelegramChatId   = "";                                // Your Telegram chat id
@@ -47,7 +48,6 @@ datetime   g_lastSyncTime   = 0;
 datetime   g_lastErrorLog   = 0;
 bool       g_filePaused     = false;
 int        g_syncSeconds    = 0;
-int        g_reportedUsage  = 0;
 
 int  ResolveSyncSeconds();
 bool ApplySyncInterval(const bool startup);
@@ -57,7 +57,7 @@ bool ApplySyncInterval(const bool startup);
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(LOG_PREFIX, "EA initialized v1.14");
+   Print(LOG_PREFIX, "EA initialized v1.15");
    if(InpEnableTelegram && StringLen(InpTelegramBotToken) > 0 && StringLen(InpTelegramChatId) > 0)
       Print(LOG_PREFIX, "Telegram: on (direct, not via Cloudflare)");
    else
@@ -100,7 +100,7 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Timer: pull saved alerts (NOT in OnTick)                         |
+//| Timer: one POST /api/ea/sync (price, usage, and saved alerts)    |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
@@ -160,7 +160,7 @@ bool ApplySyncInterval(const bool startup)
    }
    g_syncSeconds = sec;
    if(startup)
-      Print(LOG_PREFIX, "Pull alerts every ", sec, "s. Price is not uploaded.");
+      Print(LOG_PREFIX, "Sync every ", sec, "s: price, usage, and alerts in one request.");
    else
       Print(LOG_PREFIX, "Pull interval updated: ", sec, "s");
    return true;
@@ -317,7 +317,7 @@ void CheckCrosses(const double prevPrice, const double currPrice)
 }
 
 //+------------------------------------------------------------------+
-//| Sync: pull saved alerts. Local price is only for cross detection.|
+//| One request: send price + usage, receive the latest alerts.     |
 //+------------------------------------------------------------------+
 void SyncWithServer()
 {
@@ -333,7 +333,7 @@ void SyncWithServer()
       mid = 0.0;
    }
 
-   FetchConfig(mid);
+   SyncOnce(bid, ask, mid);
    g_lastSyncTime = TimeCurrent();
 }
 
@@ -504,14 +504,17 @@ bool PostHeartbeat(const double bid, const double ask, const double price)
 }
 
 //+------------------------------------------------------------------+
-//| One usage report per web refresh. Flag comes from /api/config.  |
+//| One request: send price + usage, receive the latest alerts       |
 //+------------------------------------------------------------------+
-void ReportUsageOnce(const int requestId)
+bool SyncOnce(const double bid, const double ask, const double currentPrice)
 {
-   if(requestId <= 0 || requestId == g_reportedUsage)
-      return;
-
-   string body = "{\"request_id\":" + IntegerToString(requestId) + ",\"alerts\":[";
+   string body = "{\"symbol\":\"" + EscapeJson(g_symbol) + "\"";
+   body += ",\"bid\":" + DoubleToString(bid, PriceDigits());
+   body += ",\"ask\":" + DoubleToString(ask, PriceDigits());
+   body += ",\"price\":" + DoubleToString(currentPrice, PriceDigits());
+   body += ",\"version\":" + IntegerToString(g_configVersion);
+   body += ",\"interval\":" + IntegerToString(g_syncSeconds);
+   body += ",\"alerts\":[";
    bool first = true;
    for(int i = 0; i < g_alertCount; i++)
    {
@@ -527,25 +530,12 @@ void ReportUsageOnce(const int requestId)
    }
    body += "]}";
 
+   string url = NormalizeBaseUrl() + "/api/ea/sync";
    string resp;
    int status;
-   if(!HttpRequest("POST", NormalizeBaseUrl() + "/api/ea/usage", body, resp, status))
-      return;
-   g_reportedUsage = requestId;
-   Print(LOG_PREFIX, "Reported alert usage once");
-}
-
-//+------------------------------------------------------------------+
-//| GET /api/config                                                  |
-//+------------------------------------------------------------------+
-bool FetchConfig(const double currentPrice)
-{
-   string url = NormalizeBaseUrl() + "/api/config";
-   string resp;
-   int status;
-   if(!HttpRequest("GET", url, "", resp, status))
+   if(!HttpRequest("POST", url, body, resp, status))
    {
-      LogErrorThrottled("ERROR: Invalid API response (config)");
+      LogErrorThrottled("ERROR: Invalid API response (sync)");
       return false;
    }
 
@@ -562,16 +552,8 @@ bool FetchConfig(const double currentPrice)
       return false;
    }
 
-   int usageReq = JsonGetInt(resp, "usage_request", 0);
-
    if(version == g_configVersion && g_alertCount >= 0 && g_configVersion >= 0)
-   {
-      ReportUsageOnce(usageReq);
       return true;
-   }
-
-   // Report the EA's current used/armed state before replacing it with a new config.
-   ReportUsageOnce(usageReq);
 
    bool alertsEnabled = JsonGetBool(resp, "alerts_enabled", true);
    g_filePaused = !alertsEnabled;
