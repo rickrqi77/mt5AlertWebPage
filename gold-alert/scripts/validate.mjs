@@ -90,7 +90,6 @@ assert(skippedDot(1, 2) === 0, "adjacent");
 assert(skippedDot(1, 3) === 2, "skip across top");
 assert(skippedDot(1, 7) === 4, "skip down left");
 assert(skippedDot(1, 9) === 5, "skip diagonal");
-assert("2589" === "2589", "pattern 2-5-8-9");
 assert(skippedDot(2, 5) === 0, "2-5 adjacent");
 assert(skippedDot(5, 8) === 0, "5-8 adjacent");
 assert(skippedDot(8, 9) === 0, "8-9 adjacent");
