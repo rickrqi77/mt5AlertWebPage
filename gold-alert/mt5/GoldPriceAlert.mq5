@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.06"
+#property version   "1.07"
 #property description "XAUUSD gold price alert EA. OneDrive file and/or Cloudflare API."
 
 //--- inputs
@@ -17,7 +17,7 @@ input int    InpSyncSeconds     = 2;                                  // Sync in
 input bool   InpUseLocalFile    = true;                               // Read alerts from OneDrive/Common Files
 input string InpLocalFileName   = "gold-alert\\alerts.txt";           // Relative to Common\\Files
 input bool   InpEnableTelegram  = true;                               // Notify Cloudflare on trigger (if API set)
-input bool   InpMt5Popup        = true;                               // MT5 Alert popup on the PC
+input bool   InpMt5Popup        = false;                              // true = MT5 popup on the PC (usually leave off)
 input bool   InpVerboseLog      = false;                              // true = log every heartbeat/price (fills Experts log)
 
 //--- constants
