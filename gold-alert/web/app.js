@@ -1,6 +1,6 @@
 /**
  * GOLD ALERT - Mobile web client
- * API Token is entered by user and stored in localStorage on this device.
+ * Token is entered once per device, then Face ID / platform biometrics gates later visits.
  */
 
 (function () {
@@ -9,6 +9,9 @@
   const MAX_ALERTS = 11;
   const REFRESH_MS = 1000;
   const TOKEN_KEY = "gold_alert_api_token";
+  const CRED_KEY = "gold_alert_webauthn_cred";
+  const USER_ID_KEY = "gold_alert_webauthn_user";
+  const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10;
 
   /** @type {Array<{id?: number|null, price: string, enabled: boolean, triggered: boolean}>} */
   let localAlerts = [];
@@ -25,28 +28,143 @@
   // Auth
   // -------------------------------------------------------------------------
 
-  function getToken() {
-    var token = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || "";
-    if (token && !localStorage.getItem(TOKEN_KEY)) {
-      localStorage.setItem(TOKEN_KEY, token);
+  function cookieFlags() {
+    var flags = "; Path=/; SameSite=Lax; Max-Age=" + TOKEN_COOKIE_MAX_AGE;
+    if (location.protocol === "https:") flags += "; Secure";
+    return flags;
+  }
+
+  function readCookie(name) {
+    var parts = ("; " + document.cookie).split("; " + name + "=");
+    if (parts.length < 2) return "";
+    return decodeURIComponent(parts.pop().split(";").shift() || "");
+  }
+
+  function writeCookie(name, value) {
+    document.cookie = name + "=" + encodeURIComponent(value) + cookieFlags();
+  }
+
+  function deleteCookie(name) {
+    document.cookie = name + "=; Path=/; SameSite=Lax; Max-Age=0";
+  }
+
+  function persistKey(key, value) {
+    if (!value) return;
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* Safari private mode may block localStorage */
     }
-    return token;
+    writeCookie(key, value);
+  }
+
+  function persistToken(token) {
+    persistKey(TOKEN_KEY, token);
+  }
+
+  function readStored(key) {
+    var value = "";
+    try {
+      value = localStorage.getItem(key) || "";
+    } catch {
+      value = "";
+    }
+    if (!value) {
+      try {
+        value = sessionStorage.getItem(key) || "";
+      } catch {
+        value = "";
+      }
+    }
+    if (!value) value = readCookie(key);
+    if (value) persistKey(key, value);
+    return value;
+  }
+
+  function getToken() {
+    return readStored(TOKEN_KEY);
+  }
+
+  function getCredId() {
+    return readStored(CRED_KEY);
+  }
+
+  function setCredId(id) {
+    persistKey(CRED_KEY, id);
   }
 
   function setToken(token) {
-    localStorage.setItem(TOKEN_KEY, token);
-    sessionStorage.removeItem(TOKEN_KEY);
+    persistToken(token);
+    try {
+      sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function clearStored(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+    deleteCookie(key);
   }
 
   function clearToken() {
-    localStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(TOKEN_KEY);
+    clearStored(TOKEN_KEY);
+    clearStored(CRED_KEY);
+    clearStored(USER_ID_KEY);
+  }
+
+  function getOrCreateUserId() {
+    var existing = readStored(USER_ID_KEY);
+    if (existing) return new Uint8Array(fromB64url(existing));
+    var userId = new Uint8Array(16);
+    crypto.getRandomValues(userId);
+    persistKey(USER_ID_KEY, toB64url(userId.buffer));
+    return userId;
+  }
+
+  function hideAuthError() {
+    var errEl = $("auth-error");
+    errEl.classList.add("hidden");
+    errEl.textContent = "";
+  }
+
+  function showAuthError(msg) {
+    var errEl = $("auth-error");
+    errEl.textContent = msg;
+    errEl.classList.remove("hidden");
+  }
+
+  function showTokenAuth() {
+    stopRefresh();
+    $("auth-screen").classList.remove("hidden");
+    $("app-screen").classList.add("hidden");
+    $("token-panel").classList.remove("hidden");
+    $("face-panel").classList.add("hidden");
+    $("auth-hint").textContent = "本机输入一次 Token，之后用面容 ID 进入";
+    hideAuthError();
+  }
+
+  function showFaceAuth() {
+    stopRefresh();
+    $("auth-screen").classList.remove("hidden");
+    $("app-screen").classList.add("hidden");
+    $("token-panel").classList.add("hidden");
+    $("face-panel").classList.remove("hidden");
+    $("auth-hint").textContent = "本机已记住 Token，用面容 ID 进入";
+    hideAuthError();
   }
 
   function showAuth() {
-    $("auth-screen").classList.remove("hidden");
-    $("app-screen").classList.add("hidden");
-    stopRefresh();
+    showTokenAuth();
   }
 
   function showApp() {
@@ -56,27 +174,177 @@
     refreshAll();
   }
 
+  function supportsWebAuthn() {
+    return !!(
+      window.isSecureContext &&
+      window.PublicKeyCredential &&
+      navigator.credentials &&
+      navigator.credentials.create &&
+      navigator.credentials.get
+    );
+  }
+
+  async function canUseFaceId() {
+    if (!supportsWebAuthn()) return false;
+    try {
+      if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === "function") {
+        return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
+      }
+    } catch {
+      return false;
+    }
+    return true;
+  }
+
+  function toB64url(buf) {
+    var bytes = new Uint8Array(buf);
+    var str = "";
+    for (var i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+    return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+
+  function fromB64url(value) {
+    var s = String(value).replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    var str = atob(s);
+    var bytes = new Uint8Array(str.length);
+    for (var i = 0; i < str.length; i++) bytes[i] = str.charCodeAt(i);
+    return bytes.buffer;
+  }
+
+  function randomChallenge() {
+    var buf = new Uint8Array(32);
+    crypto.getRandomValues(buf);
+    return buf.buffer;
+  }
+
+  async function enrollFaceId() {
+    try {
+      var cred = await navigator.credentials.create({
+        publicKey: {
+          challenge: randomChallenge(),
+          rp: { name: "GOLD ALERT", id: location.hostname },
+          user: {
+            id: getOrCreateUserId(),
+            name: "gold-alert",
+            displayName: "GOLD ALERT",
+          },
+          pubKeyCredParams: [
+            { type: "public-key", alg: -7 },
+            { type: "public-key", alg: -257 },
+          ],
+          timeout: 60000,
+          authenticatorSelection: {
+            authenticatorAttachment: "platform",
+            userVerification: "required",
+            residentKey: "preferred",
+          },
+          attestation: "none",
+        },
+      });
+      if (!cred) throw new Error("未完成面容 ID");
+      setCredId(toB64url(cred.rawId));
+    } catch (e) {
+      if (e && e.name === "InvalidStateError") {
+        var assertion = await navigator.credentials.get({
+          publicKey: {
+            challenge: randomChallenge(),
+            rpId: location.hostname,
+            userVerification: "required",
+            timeout: 60000,
+          },
+        });
+        if (!assertion) throw e;
+        if (assertion.rawId) setCredId(toB64url(assertion.rawId));
+        return;
+      }
+      throw e;
+    }
+  }
+
+  async function verifyFaceId() {
+    var id = getCredId();
+    if (!id) {
+      await enrollFaceId();
+      return;
+    }
+    try {
+      var assertion = await navigator.credentials.get({
+        publicKey: {
+          challenge: randomChallenge(),
+          rpId: location.hostname,
+          allowCredentials: [
+            { type: "public-key", id: fromB64url(id), transports: ["internal"] },
+          ],
+          userVerification: "required",
+          timeout: 60000,
+        },
+      });
+      if (!assertion) throw new Error("未通过面容 ID");
+    } catch (e) {
+      if (e && e.name === "NotAllowedError") throw e;
+      await enrollFaceId();
+    }
+  }
+
+  function enterApp() {
+    showApp();
+    loadAlerts().catch(function (e) {
+      if (e.message === "Unauthorized") {
+        clearToken();
+        showTokenAuth();
+      }
+    });
+  }
+
+  function faceIdErrorMessage(e) {
+    var name = e && e.name;
+    if (name === "NotAllowedError") return "未通过面容 ID";
+    if (name === "InvalidStateError") return "面容 ID 已登记，请再试一次";
+    if (name === "NotSupportedError") return "这台设备不支持面容 ID";
+    return (e && e.message) || "面容 ID 失败";
+  }
+
+  async function unlockWithFaceId() {
+    hideAuthError();
+    try {
+      await verifyFaceId();
+      enterApp();
+    } catch (e) {
+      showAuthError(faceIdErrorMessage(e));
+    }
+  }
+
   async function unlock() {
     const token = ($("token-input").value || "").trim();
-    const errEl = $("auth-error");
-    errEl.classList.add("hidden");
+    hideAuthError();
 
     if (!token) {
-      errEl.textContent = "请输入 API Token";
-      errEl.classList.remove("hidden");
+      showAuthError("请输入 API Token");
       return;
     }
 
     setToken(token);
     try {
       await api("/api/status");
-      showApp();
-      await loadAlerts();
     } catch (e) {
-      clearToken();
-      errEl.textContent = e.message === "Unauthorized" ? "Token 无效" : e.message;
-      errEl.classList.remove("hidden");
+      if (e.message === "Unauthorized") {
+        clearToken();
+        showAuthError("Token 无效");
+        return;
+      }
     }
+
+    if (await canUseFaceId()) {
+      try {
+        await enrollFaceId();
+      } catch (e) {
+        showFaceAuth();
+        showAuthError(faceIdErrorMessage(e) + "，请点「面容 ID 解锁」");
+        return;
+      }
+    }
+    enterApp();
   }
 
   // -------------------------------------------------------------------------
@@ -326,7 +594,7 @@
     } catch (e) {
       if (e.message === "Unauthorized") {
         clearToken();
-        showAuth();
+        showTokenAuth();
         return;
       }
       console.warn("refresh failed", e);
@@ -520,9 +788,18 @@
     $("token-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") unlock();
     });
+    $("btn-faceid").addEventListener("click", function () {
+      unlockWithFaceId();
+    });
+    $("btn-reenter-token").addEventListener("click", function () {
+      clearToken();
+      $("token-input").value = "";
+      showTokenAuth();
+    });
     $("btn-logout").addEventListener("click", () => {
       clearToken();
-      showAuth();
+      $("token-input").value = "";
+      showTokenAuth();
     });
     $("btn-save").addEventListener("pointerdown", rememberStep);
     $("btn-save").addEventListener("click", saveAlerts);
@@ -541,17 +818,14 @@
     bindEvents();
     const token = getToken();
     if (!token) {
-      showAuth();
+      showTokenAuth();
       return;
     }
-    try {
-      await api("/api/status");
-      showApp();
-      await loadAlerts();
-    } catch {
-      clearToken();
-      showAuth();
+    if (await canUseFaceId()) {
+      showFaceAuth();
+      return;
     }
+    enterApp();
   }
 
   if (document.readyState === "loading") {

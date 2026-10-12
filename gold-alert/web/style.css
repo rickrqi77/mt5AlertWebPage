@@ -64,6 +64,13 @@ body {
   color: var(--text-dim);
   margin: 12px 0 20px;
   font-size: 15px;
+  text-align: center;
+  line-height: 1.45;
+}
+
+#face-panel .btn-ghost {
+  margin-top: 12px;
+  width: 100%;
 }
 
 /* Brand */
