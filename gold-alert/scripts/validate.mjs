@@ -68,4 +68,28 @@ assert(r.fire === null, "no repeat while below");
 r = checkCross(3981, 3984, 3983.25, side);
 assert(r.fire === "UP", "expect UP again after re-cross");
 
+function skippedDot(from, to) {
+  const ax = (from - 1) % 3;
+  const ay = Math.floor((from - 1) / 3);
+  const bx = (to - 1) % 3;
+  const by = Math.floor((to - 1) / 3);
+  const dx = bx - ax;
+  const dy = by - ay;
+  if (dx === 0 && dy === 0) return 0;
+  if (Math.abs(dx) !== 0 && Math.abs(dy) !== 0 && Math.abs(dx) !== Math.abs(dy)) return 0;
+  if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return 0;
+  const stepX = dx === 0 ? 0 : dx / Math.abs(dx);
+  const stepY = dy === 0 ? 0 : dy / Math.abs(dy);
+  if (Math.abs(dx) === 2 && Math.abs(dy) === 2) return ax + stepX + (ay + stepY) * 3 + 1;
+  if (Math.abs(dx) === 2 && dy === 0) return ax + stepX + ay * 3 + 1;
+  if (Math.abs(dy) === 2 && dx === 0) return ax + (ay + stepY) * 3 + 1;
+  return 0;
+}
+
+assert(skippedDot(1, 2) === 0, "adjacent");
+assert(skippedDot(1, 3) === 2, "skip across top");
+assert(skippedDot(1, 7) === 4, "skip down left");
+assert(skippedDot(1, 9) === 5, "skip diagonal");
+assert("123654789".split("").sort().join("") === "123456789", "pattern uses all 9 dots");
+
 console.log("OK: all validate.mjs checks passed");

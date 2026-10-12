@@ -1,6 +1,6 @@
 /**
  * GOLD ALERT - Mobile web client
- * Token is entered once per device, then Face ID / platform biometrics gates later visits.
+ * Token is entered once per device; later visits unlock with a 9-dot pattern.
  */
 
 (function () {
@@ -9,9 +9,8 @@
   const MAX_ALERTS = 11;
   const REFRESH_MS = 1000;
   const TOKEN_KEY = "gold_alert_api_token";
-  const CRED_KEY = "gold_alert_webauthn_cred";
-  const USER_ID_KEY = "gold_alert_webauthn_user";
   const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10;
+  const PATTERN_SECRET = "123654789";
 
   /** @type {Array<{id?: number|null, price: string, enabled: boolean, triggered: boolean}>} */
   let localAlerts = [];
@@ -21,7 +20,10 @@
   let capturedStep = null;
   let alertsPaused = false;
   let alertsDirty = false;
-  let faceUnlocking = false;
+  let patternSeq = [];
+  let patternDrawing = false;
+  let patternCursor = { x: 0, y: 0 };
+  let patternResetTimer = null;
 
   const $ = (id) => document.getElementById(id);
 
@@ -86,14 +88,6 @@
     return readStored(TOKEN_KEY);
   }
 
-  function getCredId() {
-    return readStored(CRED_KEY);
-  }
-
-  function setCredId(id) {
-    persistKey(CRED_KEY, id);
-  }
-
   function setToken(token) {
     persistToken(token);
     try {
@@ -119,17 +113,6 @@
 
   function clearToken() {
     clearStored(TOKEN_KEY);
-    clearStored(CRED_KEY);
-    clearStored(USER_ID_KEY);
-  }
-
-  function getOrCreateUserId() {
-    var existing = readStored(USER_ID_KEY);
-    if (existing) return new Uint8Array(fromB64url(existing));
-    var userId = new Uint8Array(16);
-    crypto.getRandomValues(userId);
-    persistKey(USER_ID_KEY, toB64url(userId.buffer));
-    return userId;
   }
 
   function hideAuthError() {
@@ -149,20 +132,20 @@
     $("auth-screen").classList.remove("hidden");
     $("app-screen").classList.add("hidden");
     $("token-panel").classList.remove("hidden");
-    $("face-panel").classList.add("hidden");
-    $("auth-hint").textContent = "本机输入一次 Token，之后用面容 ID 进入";
+    $("pattern-panel").classList.add("hidden");
+    $("auth-hint").textContent = "本机输入一次 Token，之后滑动解锁";
     hideAuthError();
   }
 
-  function showFaceAuth() {
+  function showPatternAuth() {
     stopRefresh();
     $("auth-screen").classList.remove("hidden");
     $("app-screen").classList.add("hidden");
     $("token-panel").classList.add("hidden");
-    $("face-panel").classList.remove("hidden");
-    $("btn-faceid").classList.add("hidden");
-    $("auth-hint").textContent = "正在检查面容 ID…";
+    $("pattern-panel").classList.remove("hidden");
+    $("auth-hint").textContent = "滑动解锁";
     hideAuthError();
+    resetPattern(true);
   }
 
   function showAuth() {
@@ -176,126 +159,6 @@
     refreshAll();
   }
 
-  function supportsWebAuthn() {
-    return !!(
-      window.isSecureContext &&
-      window.PublicKeyCredential &&
-      navigator.credentials &&
-      navigator.credentials.create &&
-      navigator.credentials.get
-    );
-  }
-
-  async function canUseFaceId() {
-    if (!supportsWebAuthn()) return false;
-    try {
-      if (typeof PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable === "function") {
-        return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable();
-      }
-    } catch {
-      return false;
-    }
-    return true;
-  }
-
-  function toB64url(buf) {
-    var bytes = new Uint8Array(buf);
-    var str = "";
-    for (var i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
-    return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-  }
-
-  function fromB64url(value) {
-    var s = String(value).replace(/-/g, "+").replace(/_/g, "/");
-    while (s.length % 4) s += "=";
-    var str = atob(s);
-    var bytes = new Uint8Array(str.length);
-    for (var i = 0; i < str.length; i++) bytes[i] = str.charCodeAt(i);
-    return bytes.buffer;
-  }
-
-  function randomChallenge() {
-    var buf = new Uint8Array(32);
-    crypto.getRandomValues(buf);
-    return buf.buffer;
-  }
-
-  async function enrollFaceId() {
-    try {
-      var cred = await navigator.credentials.create({
-        publicKey: {
-          challenge: randomChallenge(),
-          rp: { name: "GOLD ALERT", id: location.hostname },
-          user: {
-            id: getOrCreateUserId(),
-            name: "gold-alert",
-            displayName: "GOLD ALERT",
-          },
-          pubKeyCredParams: [
-            { type: "public-key", alg: -7 },
-            { type: "public-key", alg: -257 },
-          ],
-          timeout: 60000,
-          authenticatorSelection: {
-            authenticatorAttachment: "platform",
-            userVerification: "required",
-            residentKey: "preferred",
-          },
-          attestation: "none",
-        },
-      });
-      if (!cred) throw new Error("未完成面容 ID");
-      setCredId(toB64url(cred.rawId));
-    } catch (e) {
-      if (e && e.name === "InvalidStateError") {
-        var assertion = await getAssertion("");
-        if (!assertion) throw e;
-        if (assertion.rawId) setCredId(toB64url(assertion.rawId));
-        return;
-      }
-      throw e;
-    }
-  }
-
-  async function getAssertion(allowId) {
-    var publicKey = {
-      challenge: randomChallenge(),
-      rpId: location.hostname,
-      userVerification: "required",
-      timeout: 60000,
-    };
-    if (allowId) {
-      publicKey.allowCredentials = [
-        { type: "public-key", id: fromB64url(allowId), transports: ["internal"] },
-      ];
-    }
-    var opts = { publicKey: publicKey, mediation: "optional" };
-    try {
-      return await navigator.credentials.get(opts);
-    } catch (e) {
-      if (e && e.name === "TypeError") {
-        delete opts.mediation;
-        return await navigator.credentials.get(opts);
-      }
-      throw e;
-    }
-  }
-
-  async function verifyFaceId() {
-    var id = getCredId();
-    if (!id) {
-      await enrollFaceId();
-      return;
-    }
-    try {
-      var assertion = await getAssertion(id);
-      if (!assertion) throw new Error("未通过面容 ID");
-    } catch (e) {
-      if (e && e.name === "NotAllowedError") throw e;
-      await enrollFaceId();
-    }
-  }
-
   function enterApp() {
     showApp();
     loadAlerts().catch(function (e) {
@@ -306,38 +169,173 @@
     });
   }
 
-  function faceIdErrorMessage(e) {
-    var name = e && e.name;
-    if (name === "NotAllowedError") return "未通过面容 ID";
-    if (name === "InvalidStateError") return "面容 ID 已登记，请再试一次";
-    if (name === "NotSupportedError") return "这台设备不支持面容 ID";
-    return (e && e.message) || "面容 ID 失败";
+  function patternDots() {
+    return Array.prototype.slice.call(document.querySelectorAll(".pattern-dot"));
   }
 
-  function isFaceLockVisible() {
-    return (
-      !$("face-panel").classList.contains("hidden") &&
-      $("app-screen").classList.contains("hidden")
-    );
-  }
-
-  async function unlockWithFaceId(auto) {
-    if (faceUnlocking) return;
-    if (auto && !isFaceLockVisible()) return;
-    faceUnlocking = true;
-    hideAuthError();
-    $("auth-hint").textContent = "正在检查面容 ID…";
-    if (auto) $("btn-faceid").classList.add("hidden");
-    try {
-      await verifyFaceId();
-      enterApp();
-    } catch (e) {
-      $("btn-faceid").classList.remove("hidden");
-      $("auth-hint").textContent = "未通过，点「面容 ID 解锁」再试";
-      showAuthError(faceIdErrorMessage(e));
-    } finally {
-      faceUnlocking = false;
+  function resetPattern(clearError) {
+    if (patternResetTimer) {
+      clearTimeout(patternResetTimer);
+      patternResetTimer = null;
     }
+    patternSeq = [];
+    patternDrawing = false;
+    var lock = $("pattern-lock");
+    if (lock) {
+      lock.classList.remove("error", "shake");
+    }
+    patternDots().forEach(function (el) {
+      el.classList.remove("on");
+    });
+    var path = $("pattern-path");
+    if (path) {
+      path.setAttribute("d", "");
+      path.setAttribute("stroke", "#d4a017");
+    }
+    if (clearError) hideAuthError();
+  }
+
+  function skippedDot(from, to) {
+    var ax = (from - 1) % 3;
+    var ay = Math.floor((from - 1) / 3);
+    var bx = (to - 1) % 3;
+    var by = Math.floor((to - 1) / 3);
+    var dx = bx - ax;
+    var dy = by - ay;
+    if (dx === 0 && dy === 0) return 0;
+    if (Math.abs(dx) !== 0 && Math.abs(dy) !== 0 && Math.abs(dx) !== Math.abs(dy)) return 0;
+    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return 0;
+    var stepX = dx === 0 ? 0 : dx / Math.abs(dx);
+    var stepY = dy === 0 ? 0 : dy / Math.abs(dy);
+    if (Math.abs(dx) === 2 && Math.abs(dy) === 2) {
+      return (ax + stepX) + (ay + stepY) * 3 + 1;
+    }
+    if (Math.abs(dx) === 2 && dy === 0) return ax + stepX + ay * 3 + 1;
+    if (Math.abs(dy) === 2 && dx === 0) return ax + (ay + stepY) * 3 + 1;
+    return 0;
+  }
+
+  function addPatternDot(n) {
+    n = String(n);
+    if (patternSeq.indexOf(n) >= 0) return;
+    if (patternSeq.length) {
+      var mid = skippedDot(Number(patternSeq[patternSeq.length - 1]), Number(n));
+      if (mid && patternSeq.indexOf(String(mid)) < 0) {
+        patternSeq.push(String(mid));
+        var midEl = document.querySelector('.pattern-dot[data-n="' + mid + '"]');
+        if (midEl) midEl.classList.add("on");
+      }
+    }
+    patternSeq.push(n);
+    var el = document.querySelector('.pattern-dot[data-n="' + n + '"]');
+    if (el) el.classList.add("on");
+    if (navigator.vibrate) {
+      try {
+        navigator.vibrate(12);
+      } catch {
+        /* ignore */
+      }
+    }
+    drawPatternLines();
+  }
+
+  function drawPatternLines() {
+    var lock = $("pattern-lock");
+    var path = $("pattern-path");
+    if (!lock || !path) return;
+    var wrap = lock.getBoundingClientRect();
+    var d = "";
+    patternSeq.forEach(function (n, i) {
+      var el = document.querySelector('.pattern-dot[data-n="' + n + '"]');
+      if (!el) return;
+      var r = el.getBoundingClientRect();
+      var x = r.left + r.width / 2 - wrap.left;
+      var y = r.top + r.height / 2 - wrap.top;
+      d += (i === 0 ? "M" : "L") + x + " " + y;
+    });
+    if (patternDrawing && patternSeq.length) {
+      d += "L" + patternCursor.x + " " + patternCursor.y;
+    }
+    path.setAttribute("d", d);
+  }
+
+  function hitPatternDot(clientX, clientY) {
+    var dots = patternDots();
+    var best = null;
+    var bestD = Infinity;
+    for (var i = 0; i < dots.length; i++) {
+      var r = dots[i].getBoundingClientRect();
+      var cx = r.left + r.width / 2;
+      var cy = r.top + r.height / 2;
+      var radius = Math.max(r.width, r.height) * 1.6;
+      var dx = cx - clientX;
+      var dy = cy - clientY;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= radius && dist < bestD) {
+        best = dots[i];
+        bestD = dist;
+      }
+    }
+    return best;
+  }
+
+  function setPatternCursor(clientX, clientY) {
+    var wrap = $("pattern-lock").getBoundingClientRect();
+    patternCursor = { x: clientX - wrap.left, y: clientY - wrap.top };
+  }
+
+  function onPatternPointerDown(e) {
+    if ($("pattern-panel").classList.contains("hidden")) return;
+    e.preventDefault();
+    resetPattern(true);
+    $("auth-hint").textContent = "滑动解锁";
+    patternDrawing = true;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+    setPatternCursor(e.clientX, e.clientY);
+    var hit = hitPatternDot(e.clientX, e.clientY);
+    if (hit) addPatternDot(hit.getAttribute("data-n"));
+  }
+
+  function onPatternPointerMove(e) {
+    if (!patternDrawing) return;
+    e.preventDefault();
+    setPatternCursor(e.clientX, e.clientY);
+    var hit = hitPatternDot(e.clientX, e.clientY);
+    if (hit) addPatternDot(hit.getAttribute("data-n"));
+    else drawPatternLines();
+  }
+
+  function finishPattern() {
+    if (!patternDrawing && !patternSeq.length) return;
+    patternDrawing = false;
+    drawPatternLines();
+    var code = patternSeq.join("");
+    if (!code) return;
+    if (code === PATTERN_SECRET) {
+      $("auth-hint").textContent = "已解锁";
+      hideAuthError();
+      enterApp();
+      return;
+    }
+    var lock = $("pattern-lock");
+    lock.classList.add("error", "shake");
+    $("pattern-path").setAttribute("stroke", "#e74c3c");
+    $("auth-hint").textContent = "图案错误，再试一次";
+    showAuthError("图案错误");
+    patternResetTimer = setTimeout(function () {
+      resetPattern(true);
+      $("auth-hint").textContent = "滑动解锁";
+    }, 450);
+  }
+
+  function onPatternPointerUp(e) {
+    if (!patternDrawing) return;
+    e.preventDefault();
+    finishPattern();
   }
 
   async function unlock() {
@@ -356,16 +354,6 @@
       if (e.message === "Unauthorized") {
         clearToken();
         showAuthError("Token 无效");
-        return;
-      }
-    }
-
-    if (await canUseFaceId()) {
-      try {
-        await enrollFaceId();
-      } catch (e) {
-        showFaceAuth();
-        showAuthError(faceIdErrorMessage(e) + "，请点「面容 ID 解锁」");
         return;
       }
     }
@@ -627,10 +615,6 @@
   }
 
   function onPageVisible() {
-    if (isFaceLockVisible()) {
-      unlockWithFaceId(true);
-      return;
-    }
     if (!getToken()) return;
     if ($("app-screen").classList.contains("hidden")) return;
     alertsDirty = false;
@@ -817,8 +801,13 @@
     $("token-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") unlock();
     });
-    $("btn-faceid").addEventListener("click", function () {
-      unlockWithFaceId(false);
+    var lock = $("pattern-lock");
+    lock.addEventListener("pointerdown", onPatternPointerDown);
+    lock.addEventListener("pointermove", onPatternPointerMove);
+    lock.addEventListener("pointerup", onPatternPointerUp);
+    lock.addEventListener("pointercancel", onPatternPointerUp);
+    lock.addEventListener("lostpointercapture", function () {
+      if (patternDrawing) finishPattern();
     });
     $("btn-reenter-token").addEventListener("click", function () {
       clearToken();
@@ -845,17 +834,11 @@
 
   function init() {
     bindEvents();
-    const token = getToken();
-    if (!token) {
+    if (!getToken()) {
       showTokenAuth();
       return;
     }
-    if (supportsWebAuthn()) {
-      showFaceAuth();
-      unlockWithFaceId(true);
-      return;
-    }
-    enterApp();
+    showPatternAuth();
   }
 
   init();

@@ -53,7 +53,7 @@ body {
 
 /* Auth */
 .auth-box {
-  margin-top: 18vh;
+  margin-top: 8vh;
   padding: 28px 20px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -68,9 +68,81 @@ body {
   line-height: 1.45;
 }
 
-#face-panel .btn-ghost {
-  margin-top: 12px;
+#pattern-panel .btn-ghost {
+  margin-top: 16px;
   width: 100%;
+}
+
+.pattern-lock {
+  position: relative;
+  width: min(280px, 72vw);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.pattern-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  width: 100%;
+  height: 100%;
+  position: relative;
+  z-index: 1;
+}
+
+.pattern-dot {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(212, 160, 23, 0.75);
+  border-radius: 50%;
+  margin: auto;
+  background: #111;
+  box-shadow: 0 0 0 16px transparent;
+}
+
+.pattern-dot.on {
+  background: var(--gold);
+  border-color: var(--gold);
+  box-shadow: 0 0 0 10px rgba(212, 160, 23, 0.18);
+}
+
+.pattern-lock.error .pattern-dot.on {
+  background: var(--red);
+  border-color: var(--red);
+  box-shadow: 0 0 0 10px rgba(231, 76, 60, 0.18);
+}
+
+.pattern-lock.error #pattern-path {
+  stroke: var(--red);
+}
+
+@keyframes pattern-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-10px);
+  }
+  75% {
+    transform: translateX(10px);
+  }
+}
+
+.pattern-lock.shake {
+  animation: pattern-shake 0.35s ease;
 }
 
 /* Brand */
