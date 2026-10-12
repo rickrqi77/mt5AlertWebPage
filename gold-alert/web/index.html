@@ -10,7 +10,7 @@
   <title>GOLD ALERT</title>
   <link rel="icon" href="/icon.jpg" type="image/jpeg" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/style.css?v=28" />
+  <link rel="stylesheet" href="/style.css?v=29" />
 </head>
 <body>
   <!-- Token unlock screen (API token never hardcoded) -->
@@ -49,8 +49,11 @@
 
     <section class="hero-price">
       <div class="symbol" id="symbol">XAUUSD</div>
-      <div class="label">当前价格</div>
-      <div class="price" id="current-price">--</div>
+      <div class="label" id="price-label">当前价格</div>
+      <div class="price-line">
+        <div class="price" id="current-price">--</div>
+        <button id="btn-spot" class="btn-spot" type="button">刷新</button>
+      </div>
       <div class="bid-ask">
         <span>Bid <strong id="bid">--</strong></span>
         <span>Ask <strong id="ask">--</strong></span>
@@ -100,6 +103,6 @@
     </footer>
   </div>
 
-  <script src="/app.js?v=28"></script>
+  <script src="/app.js?v=29"></script>
 </body>
 </html>

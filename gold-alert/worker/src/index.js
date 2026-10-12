@@ -10,6 +10,8 @@
 const EA_OFFLINE_SECONDS = 45;
 const MAX_ALERTS = 15;
 const AUTO_GRID_SIDE = 7;
+const SWISSQUOTE_XAU_URL =
+  "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAU/USD";
 
 export default {
   async fetch(request, env, ctx) {
@@ -54,6 +56,9 @@ async function handleApi(request, env, url) {
 
   if (method === "GET" && path === "/api/status") {
     return await getStatus(env);
+  }
+  if (method === "GET" && path === "/api/spot") {
+    return await getSpot();
   }
   if (method === "GET" && path === "/api/alerts") {
     return await getAlerts(env);
@@ -152,6 +157,55 @@ async function getStatus(env) {
     alerts_enabled: settings?.alerts_enabled === 0 ? false : true,
     paused: settings?.alerts_enabled === 0,
     config_version: status?.config_version ?? 1,
+  });
+}
+
+function pickSwissquoteQuote(payload) {
+  const rows = Array.isArray(payload) ? payload : [];
+  let fallback = null;
+  for (const row of rows) {
+    const profiles = Array.isArray(row.spreadProfilePrices) ? row.spreadProfilePrices : [];
+    for (const profile of profiles) {
+      const bid = Number(profile.bid);
+      const ask = Number(profile.ask);
+      if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0 || ask < bid) continue;
+      const quote = {
+        bid: roundPrice(bid),
+        ask: roundPrice(ask),
+        price: roundPrice((bid + ask) / 2),
+      };
+      if (!fallback) fallback = quote;
+      if (profile.spreadProfile === "prime") return quote;
+    }
+  }
+  return fallback;
+}
+
+async function getSpot() {
+  let payload;
+  try {
+    const res = await fetch(SWISSQUOTE_XAU_URL, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      return json({ error: "现货价格暂时取不到" }, 502);
+    }
+    payload = await res.json();
+  } catch {
+    return json({ error: "现货价格暂时取不到" }, 502);
+  }
+
+  const quote = pickSwissquoteQuote(payload);
+  if (!quote) {
+    return json({ error: "现货价格暂时取不到" }, 502);
+  }
+
+  return json({
+    symbol: "XAUUSD",
+    price: quote.price,
+    bid: quote.bid,
+    ask: quote.ask,
+    source: "swissquote",
   });
 }
 

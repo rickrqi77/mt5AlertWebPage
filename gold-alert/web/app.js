@@ -21,6 +21,7 @@
   let alertsDirty = false;
   let warmupPromise = null;
   let dataReady = false;
+  let spotHoldUntil = 0;
 
   const $ = (id) => document.getElementById(id);
 
@@ -364,12 +365,21 @@
   // Data refresh
   // -------------------------------------------------------------------------
 
-  async function refreshStatus() {
-    const data = await api("/api/status");
-    $("symbol").textContent = data.symbol || "XAUUSD";
+  function showQuote(data) {
     $("current-price").textContent = formatPrice(data.price);
     $("bid").textContent = formatPrice(data.bid);
     $("ask").textContent = formatPrice(data.ask);
+  }
+
+  async function refreshStatus() {
+    const data = await api("/api/status");
+    $("symbol").textContent = data.symbol || "XAUUSD";
+    if (Date.now() >= spotHoldUntil) {
+      showQuote(data);
+      $("price-label").textContent = "当前价格";
+      $("last-refresh").textContent =
+        "刷新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    }
     renderEaStatus(!!data.ea_online);
     alertsPaused = !!data.paused || data.alerts_enabled === false;
     renderPauseButton();
@@ -379,9 +389,24 @@
       setStepInput(data.step);
       stepHydrated = true;
     }
-    $("last-refresh").textContent =
-      "刷新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
     return data;
+  }
+
+  async function refreshSpot() {
+    const btn = $("btn-spot");
+    btn.disabled = true;
+    try {
+      const data = await api("/api/spot");
+      showQuote(data);
+      spotHoldUntil = Date.now() + 15000;
+      $("price-label").textContent = "现货价格";
+      $("last-refresh").textContent =
+        "现货 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    } catch (e) {
+      toast(e.message || "现货价格暂时取不到", "error");
+    } finally {
+      btn.disabled = false;
+    }
   }
 
   async function loadAlerts(opts) {
@@ -638,6 +663,7 @@
     $("btn-clear").addEventListener("click", clearAll);
     $("step-input").addEventListener("change", rememberStep);
     $("btn-pause").addEventListener("click", togglePause);
+    $("btn-spot").addEventListener("click", refreshSpot);
     document.addEventListener("visibilitychange", function () {
       if (document.visibilityState === "visible") onPageVisible();
     });
