@@ -6,15 +6,18 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.05"
-#property description "XAUUSD gold price alert EA. Syncs with Cloudflare API."
+#property version   "1.06"
+#property description "XAUUSD gold price alert EA. OneDrive file and/or Cloudflare API."
 
 //--- inputs
-input string InpApiBaseUrl      = "https://your-worker.workers.dev"; // Cloudflare Worker base URL (no trailing slash)
+input string InpApiBaseUrl      = "";                                 // Cloudflare URL, empty = do not use website
 input string InpApiToken        = "";                                 // API Token (same as Worker secret API_TOKEN)
 input string InpSymbol          = "";                                 // Empty = chart symbol
-input int    InpSyncSeconds     = 1;                                  // Server sync interval (seconds)
-input bool   InpEnableTelegram  = true;                               // Notify Cloudflare on trigger (Telegram via Worker)
+input int    InpSyncSeconds     = 2;                                  // Sync interval (seconds)
+input bool   InpUseLocalFile    = true;                               // Read alerts from OneDrive/Common Files
+input string InpLocalFileName   = "gold-alert\\alerts.txt";           // Relative to Common\\Files
+input bool   InpEnableTelegram  = true;                               // Notify Cloudflare on trigger (if API set)
+input bool   InpMt5Popup        = true;                               // MT5 Alert popup on the PC
 input bool   InpVerboseLog      = false;                              // true = log every heartbeat/price (fills Experts log)
 
 //--- constants
@@ -42,6 +45,7 @@ bool       g_apiOk          = false;
 bool       g_loggedApiOk    = false;
 datetime   g_lastSyncTime   = 0;
 datetime   g_lastErrorLog   = 0;
+string     g_localFileSig   = "";
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
@@ -50,14 +54,9 @@ int OnInit()
 {
    Print(LOG_PREFIX, "EA initialized");
 
-   if(StringLen(InpApiBaseUrl) < 8)
+   if(!InpUseLocalFile && !HasCloudApi())
    {
-      Print(LOG_PREFIX, "ERROR: InpApiBaseUrl is empty or invalid");
-      return(INIT_PARAMETERS_INCORRECT);
-   }
-   if(StringLen(InpApiToken) < 1)
-   {
-      Print(LOG_PREFIX, "ERROR: InpApiToken is empty");
+      Print(LOG_PREFIX, "ERROR: Enable InpUseLocalFile (OneDrive) or set InpApiBaseUrl + InpApiToken");
       return(INIT_PARAMETERS_INCORRECT);
    }
 
@@ -66,7 +65,12 @@ int OnInit()
       g_symbol = _Symbol;
 
    Print(LOG_PREFIX, "Symbol: ", g_symbol);
-   Print(LOG_PREFIX, "API: ", InpApiBaseUrl);
+   if(HasCloudApi())
+      Print(LOG_PREFIX, "API: ", InpApiBaseUrl);
+   else
+      Print(LOG_PREFIX, "API: off (OneDrive/local file mode)");
+   if(InpUseLocalFile)
+      Print(LOG_PREFIX, "Local file: Common\\Files\\", InpLocalFileName);
    Print(LOG_PREFIX, "Sync interval: ", InpSyncSeconds, "s");
 
    if(!SymbolSelect(g_symbol, true))
@@ -218,8 +222,7 @@ void CheckCrosses(const double prevPrice, const double currPrice)
          if(g_alerts[i].side <= 0)
          {
             Print(LOG_PREFIX, "ALERT UP: ", FormatPrice(ap), "  curr=", FormatPrice(currPrice));
-            if(InpEnableTelegram)
-               SendTrigger(g_alerts[i].id, currPrice, ap, "UP");
+            NotifyTrigger(g_alerts[i].id, currPrice, ap, "UP");
             g_alerts[i].enabled = false; // one-shot: wait until user re-enables on web
             g_alerts[i].side = 1;
          }
@@ -234,8 +237,7 @@ void CheckCrosses(const double prevPrice, const double currPrice)
          if(g_alerts[i].side >= 0)
          {
             Print(LOG_PREFIX, "ALERT DOWN: ", FormatPrice(ap), "  curr=", FormatPrice(currPrice));
-            if(InpEnableTelegram)
-               SendTrigger(g_alerts[i].id, currPrice, ap, "DOWN");
+            NotifyTrigger(g_alerts[i].id, currPrice, ap, "DOWN");
             g_alerts[i].enabled = false;
             g_alerts[i].side = -1;
          }
@@ -270,14 +272,153 @@ void SyncWithServer()
    if(InpVerboseLog)
       Print(LOG_PREFIX, "Price: ", FormatPrice(mid), "  bid=", FormatPrice(bid), "  ask=", FormatPrice(ask));
 
-   // Heartbeat
-   if(!PostHeartbeat(bid, ask, mid))
-      return;
+   bool loadedFile = false;
+   if(InpUseLocalFile)
+      loadedFile = LoadLocalAlerts(mid);
 
-   // Config
-   FetchConfig(mid);
+   if(HasCloudApi())
+   {
+      if(!PostHeartbeat(bid, ask, mid))
+      {
+         if(!loadedFile)
+            return;
+      }
+      else if(!loadedFile)
+         FetchConfig(mid);
+   }
 
    g_lastSyncTime = TimeCurrent();
+}
+
+bool HasCloudApi()
+{
+   if(StringLen(InpApiBaseUrl) < 8)
+      return false;
+   if(StringFind(InpApiBaseUrl, "your-worker") >= 0)
+      return false;
+   if(StringLen(InpApiToken) < 1)
+      return false;
+   return true;
+}
+
+void NotifyTrigger(const int alertId, const double price, const double triggerPrice, const string direction)
+{
+   string msg = FormatPrice(triggerPrice) + " _ " + FormatPrice(price);
+   if(InpMt5Popup)
+      Alert(msg);
+   if(InpEnableTelegram && HasCloudApi())
+      SendTrigger(alertId, price, triggerPrice, direction);
+}
+
+string TrimLine(string s)
+{
+   StringReplace(s, "\r", "");
+   StringTrimLeft(s);
+   StringTrimRight(s);
+   return s;
+}
+
+bool LoadLocalAlerts(const double currentPrice)
+{
+   if(!FileIsExist(InpLocalFileName, FILE_COMMON))
+      return false;
+
+   int fh = FileOpen(InpLocalFileName, FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_COMMON);
+   if(fh == INVALID_HANDLE)
+   {
+      LogErrorThrottled("ERROR: Cannot open local alerts file (set OneDrive folder Always keep on this device)");
+      return false;
+   }
+
+   string raw = "";
+   while(!FileIsEnding(fh))
+      raw += FileReadString(fh) + "\n";
+   FileClose(fh);
+
+   if(raw == g_localFileSig)
+      return (g_alertCount > 0);
+
+   AlertState newAlerts[MAX_ALERTS];
+   int newCount = 0;
+   for(int i = 0; i < MAX_ALERTS; i++)
+   {
+      newAlerts[i].id = 0;
+      newAlerts[i].price = 0.0;
+      newAlerts[i].enabled = false;
+      newAlerts[i].side = 0;
+      newAlerts[i].valid = false;
+   }
+
+   int start = 0;
+   int nlen = StringLen(raw);
+   while(start < nlen && newCount < MAX_ALERTS)
+   {
+      int nl = StringFind(raw, "\n", start);
+      if(nl < 0) nl = nlen;
+      string line = TrimLine(StringSubstr(raw, start, nl - start));
+      start = nl + 1;
+      if(StringLen(line) == 0) continue;
+      if(StringGetCharacter(line, 0) == '#') continue;
+      if(StringFind(line, "=") >= 0) continue;
+
+      bool enabled = true;
+      if(StringGetCharacter(line, 0) == '!')
+      {
+         enabled = false;
+         line = TrimLine(StringSubstr(line, 1));
+      }
+      int comma = StringFind(line, ",");
+      if(comma > 0)
+      {
+         string flag = TrimLine(StringSubstr(line, comma + 1));
+         line = TrimLine(StringSubstr(line, 0, comma));
+         if(flag == "0" || flag == "off" || flag == "false")
+            enabled = false;
+      }
+      double price = StringToDouble(line);
+      if(price <= 0.0) continue;
+
+      newAlerts[newCount].id = newCount + 1;
+      newAlerts[newCount].price = price;
+      newAlerts[newCount].enabled = enabled;
+      newAlerts[newCount].valid = true;
+      newAlerts[newCount].side = 0;
+      for(int k = 0; k < g_alertCount; k++)
+      {
+         if(g_alerts[k].valid && MathAbs(g_alerts[k].price - price) < 1e-8)
+         {
+            newAlerts[newCount].side = g_alerts[k].side;
+            break;
+         }
+      }
+      newCount++;
+   }
+
+   if(newCount == 0)
+   {
+      LogErrorThrottled("ERROR: Local alerts file has no prices");
+      return false;
+   }
+
+   for(int i = 0; i < MAX_ALERTS; i++)
+      g_alerts[i] = newAlerts[i];
+   g_alertCount = newCount;
+   g_localFileSig = raw;
+   g_configVersion++;
+
+   for(int i = 0; i < g_alertCount; i++)
+   {
+      if(g_alerts[i].side == 0 && currentPrice > 0.0)
+      {
+         if(currentPrice < g_alerts[i].price)
+            g_alerts[i].side = -1;
+         else if(currentPrice > g_alerts[i].price)
+            g_alerts[i].side = 1;
+      }
+   }
+
+   Print(LOG_PREFIX, "Loaded ", g_alertCount, " alerts from local file");
+   return true;
 }
 
 //+------------------------------------------------------------------+
