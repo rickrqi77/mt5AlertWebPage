@@ -260,38 +260,41 @@ https://gold-alert.xxxxx.workers.dev
 
 ---
 
-## 九-B、手机网页读取价格和 EA 状态
+## 九-B、网页读写 OneDrive 文件（不经过 Cloudflare）
 
-网页打开后持续请求 Cloudflare `GET /api/status`。当前价格、Bid、Ask 和 EA 在线/离线都来自这里，不读 OneDrive。
+手机网页登录 Microsoft 后，只读写 OneDrive 里的 `gold-alert` 文件夹。
 
-EA 大约每 2 秒 `POST /api/ea/heartbeat`。超过约 15 秒没有新心跳，网页显示离线。
+- `status.json`：电脑 EA 写入现价。网页用它显示价格和 EA 在线。
+- `alerts.txt`：网页点「设定」或「保存设置」时写入。EA 读取后换提醒。
+- `paused.txt`：暂停 / 恢复。
+
+- 说明与 Azure 应用注册：`https://alertdata.pages.dev/onedrive.html`
+- EA：`InpUseLocalFile = true`，Cloudflare 地址留空
+- 电脑运行一次：`scripts/link-onedrive-alerts.bat`
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.08）
 
 ---
 
 ## 十、手机网页使用方法（iPhone Safari）
 
 1. Safari 打开：`https://alertdata.pages.dev/`
-2. **第一次**输入 **API Token**，点「解锁」
-3. 以后再打开：本机已记住 Token，直接进入，不用再输入。只有新设备第一次才要 Token（点「退出」才会清除）
-4. 页面会显示：
-   - **GOLD ALERT**
-   - XAUUSD 当前价格（来自 EA 上传的 MT5 价格）
-   - EA 在线 / 离线状态
-5. 设置间隔（例如 `5`）
-6. 可「设定」生成上下各 7 档 + 当前整数价（最多 15 个）
-7. 点「保存设置」
+2. 按 [onedrive.html](https://alertdata.pages.dev/onedrive.html) 注册 Azure 应用，把 Client ID 填进网页，登录 Microsoft（和电脑 OneDrive 同一个账号）
+3. 页面从 OneDrive 的 `status.json` 显示当前价格和 EA 在线 / 离线
+4. 设置间隔（例如 `5`）
+5. 点「设定」按现价生成 15 个价格，并写入 `alerts.txt`
+6. 改完点「保存设置」，同样写入 `alerts.txt`
 
 ### 功能说明
 
 | 功能 | 说明 |
 |------|------|
-| 当前价格 | 最近一次 EA 上传的 MT5 XAUUSD 价格 |
-| EA 状态 | `last_seen` 超过约 15 秒 → 🔴 离线 |
-| 自动生成 | 以当前整数价为中心，上下各 7 档 + 中间一档（最多 15 个） |
-| 保存设置 | 写入 D1，EA 约 3 秒内自动同步 |
-| 全部清除 | 删除全部提醒 |
+| 当前价格 | OneDrive `status.json` 里 EA 写下的 MT5 价格 |
+| EA 状态 | `status.json` 的时间超过约 45 秒 → 🔴 离线 |
+| 自动生成 | 以当前整数价为中心，上下各 7 档 + 中间一档（最多 15 个），写入 `alerts.txt` |
+| 保存设置 | 写入 OneDrive `alerts.txt`，EA 读本地文件后同步 |
+| 全部清除 | 清空 `alerts.txt` |
 
-> 网页关闭后，EA **继续工作**。重新打开网页会从 API 读取最新状态。
+> 网页关闭后，EA **继续工作**。重新打开网页会再读 OneDrive 里的 `status.json` 和 `alerts.txt`。
 
 ---
 
