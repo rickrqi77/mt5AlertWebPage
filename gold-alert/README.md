@@ -264,7 +264,7 @@ https://gold-alert.xxxxx.workers.dev
 
 1. Safari 打开：`https://alertdata.pages.dev/`
 2. **第一次**输入 **API Token**，点「解锁」
-3. 以后再打开：本机不再输入 Token，用 **九宫格滑动解锁**（图案 `123654789`：上排左→右，中排右→左，下排左→右）
+3. 以后再打开：本机不再输入 Token，用 **九宫格滑动解锁**（图案 `2589`：中列从上到下 2→5→8，再向右到 9）
 4. 页面会显示：
    - **GOLD ALERT**
    - XAUUSD 当前价格（来自 EA 上传的 MT5 价格）

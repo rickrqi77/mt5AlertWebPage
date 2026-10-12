@@ -10,7 +10,7 @@
   const REFRESH_MS = 1000;
   const TOKEN_KEY = "gold_alert_api_token";
   const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10;
-  const PATTERN_SECRET = "123654789";
+  const PATTERN_SECRET = "2589";
 
   /** @type {Array<{id?: number|null, price: string, enabled: boolean, triggered: boolean}>} */
   let localAlerts = [];
