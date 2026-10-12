@@ -324,22 +324,16 @@ async function autoGenerateAlerts(request, env) {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  const status = await env.DB.prepare("SELECT * FROM system_status WHERE id = 1").first();
   const settings = await env.DB.prepare("SELECT step FROM settings WHERE id = 1").first();
-
-  if (!isEaOnline(status?.last_seen) || status?.price == null) {
-    return json(
-      { error: "EA当前离线，无法获取最新黄金价格。", code: "EA_OFFLINE" },
-      409
-    );
+  const currentPrice = Number(body.price);
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+    return json({ error: "请先刷新现货价格" }, 400);
   }
 
   let step = body.step != null ? Number(body.step) : Number(settings?.step ?? 5);
   if (!Number.isFinite(step) || step <= 0) {
     return json({ error: "Invalid step" }, 400);
   }
-
-  const currentPrice = Number(status.price);
   // Integer part is the center row, e.g. 4181.2 → 4181 (default off)
   const base = Math.trunc(currentPrice);
   const prices = [];

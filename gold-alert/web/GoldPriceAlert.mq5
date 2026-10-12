@@ -1,24 +1,24 @@
 //+------------------------------------------------------------------+
 //|                                              GoldPriceAlert.mq5  |
 //|                     XAUUSD Gold Price Alert System for MT5       |
-//|  Pushes price to Cloudflare every 15s, pulls saved alerts,       |
-//|  and sends Telegram directly when a price is crossed.            |
+//|  Pulls saved alerts from Cloudflare every 3s. Does not upload    |
+//|  price. Sends Telegram directly when a price is crossed.        |
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.11"
-#property description "XAUUSD gold price alert EA. Price and alerts via Cloudflare every 15s. Telegram sent by the EA."
+#property version   "1.12"
+#property description "XAUUSD gold price alert EA. Pulls Cloudflare alerts every 3s. Does not upload price. Telegram sent by the EA."
 
 //--- inputs
 input string InpApiBaseUrl      = "https://alertdata.pages.dev";      // Cloudflare site, no trailing slash
 input string InpApiToken        = "";                                 // API Token (same as Worker secret API_TOKEN)
 input string InpSymbol          = "";                                 // Empty = chart symbol
-input int    InpSyncSeconds     = 15;                                 // Push price and pull alerts (seconds, minimum 15)
+input int    InpSyncSeconds     = 3;                                  // Pull saved alerts (seconds, minimum 3). Does not upload price.
 input bool   InpEnableTelegram  = false;                              // true = send Telegram when a price is crossed
 input string InpTelegramBotToken = "";                                // Bot token from BotFather
 input string InpTelegramChatId   = "";                                // Your Telegram chat id
 input bool   InpMt5Popup        = false;                              // true = MT5 popup on the PC (usually leave off)
-input bool   InpVerboseLog      = false;                              // true = log every heartbeat/price (fills Experts log)
+input bool   InpVerboseLog      = false;                              // true = log every local price read (fills Experts log)
 
 //--- constants
 #define MAX_ALERTS           15
@@ -52,7 +52,7 @@ bool       g_filePaused     = false;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(LOG_PREFIX, "EA initialized v1.11");
+   Print(LOG_PREFIX, "EA initialized v1.12");
    if(InpEnableTelegram && StringLen(InpTelegramBotToken) > 0 && StringLen(InpTelegramChatId) > 0)
       Print(LOG_PREFIX, "Telegram: on (direct, not via Cloudflare)");
    else
@@ -77,8 +77,8 @@ int OnInit()
    ResetAlerts();
 
    int syncSec = InpSyncSeconds;
-   if(syncSec < 15) syncSec = 15;
-   Print(LOG_PREFIX, "Sync interval: ", syncSec, "s");
+   if(syncSec < 3) syncSec = 3;
+   Print(LOG_PREFIX, "Pull alerts every ", syncSec, "s. Price is not uploaded.");
    if(!EventSetTimer(syncSec))
    {
       Print(LOG_PREFIX, "ERROR: EventSetTimer failed");
@@ -101,7 +101,7 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Timer: sync config + heartbeat (NOT in OnTick)                   |
+//| Timer: pull saved alerts (NOT in OnTick)                         |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
@@ -259,27 +259,23 @@ void CheckCrosses(const double prevPrice, const double currPrice)
 }
 
 //+------------------------------------------------------------------+
-//| Sync: heartbeat + config fetch                                   |
+//| Sync: pull saved alerts. Local price is only for cross detection.|
 //+------------------------------------------------------------------+
 void SyncWithServer()
 {
    double bid = 0.0, ask = 0.0, mid = 0.0;
-   if(!GetPrices(bid, ask, mid))
+   if(GetPrices(bid, ask, mid))
+   {
+      if(InpVerboseLog)
+         Print(LOG_PREFIX, "Price: ", FormatPrice(mid), "  bid=", FormatPrice(bid), "  ask=", FormatPrice(ask));
+   }
+   else
    {
       LogErrorThrottled("ERROR: Cannot read prices for " + g_symbol);
-      return;
+      mid = 0.0;
    }
 
-   if(InpVerboseLog)
-      Print(LOG_PREFIX, "Price: ", FormatPrice(mid), "  bid=", FormatPrice(bid), "  ask=", FormatPrice(ask));
-
-   bool wasOk = g_loggedApiOk;
-   if(!PostHeartbeat(bid, ask, mid))
-      return;
-   if(!wasOk)
-      Print(LOG_PREFIX, "API connected");
    FetchConfig(mid);
-
    g_lastSyncTime = TimeCurrent();
 }
 

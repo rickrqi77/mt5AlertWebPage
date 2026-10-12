@@ -262,10 +262,10 @@ https://gold-alert.xxxxx.workers.dev
 
 ## 九-B、网页和 EA 都走 Cloudflare，触发后 EA 直接发 Telegram
 
-EA 每 15 秒把现价推到 Cloudflare，并拉取已保存的提醒。网页每 15 秒刷新价格。设定和保存写入 Cloudflare，不使用 OneDrive。价格穿越后，EA 直接把消息发给 Telegram。
+EA 每 3 秒向 Cloudflare 拉取已保存的提醒，不上传现价。网页打开时不取价格；点「刷新」才向 Swissquote 要一次现货价。设定和保存写入 Cloudflare。价格穿越后，EA 直接把消息发给 Telegram。
 
 - 手机网页：`https://alertdata.pages.dev/`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.11）
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.12）
 
 ---
 
@@ -273,19 +273,18 @@ EA 每 15 秒把现价推到 Cloudflare，并拉取已保存的提醒。网页�
 
 1. Safari 打开：`https://alertdata.pages.dev/`
 2. **第一次**输入 **API Token**，点「解锁」
-3. 页面每 15 秒显示 EA 推上来的现价，以及 EA 在线 / 离线
+3. 点价格右边的「刷新」，向 Swissquote 取一次现货价。打开页面时不会自动取价
 4. 设置间隔（例如 `5`），点「设定」生成价格
-5. 点「保存设置」，提醒写入 Cloudflare，EA 约 15 秒内取回
+5. 点「保存设置」，提醒写入 Cloudflare，EA 约 3 秒内取回
 
 ### 功能说明
 
 | 功能 | 说明 |
 |------|------|
-| 当前价格 | EA 每 15 秒推到 Cloudflare 的 MT5 价格，网页每 15 秒刷新 |
-| 刷新 | 价格右边的按钮。点一次，立刻向 Swissquote 取一笔现货价，不等 EA。约 15 秒后页面恢复显示 EA 价格 |
-| EA 状态 | 超过约 45 秒没有新价格 → 🔴 离线 |
-| 自动生成 | 以当前整数价为中心，上下各 7 档 + 中间一档（最多 15 个） |
-| 保存设置 | 写入 Cloudflare，EA 约 15 秒内取回 |
+| 当前价格 | 打开页面时是 `--`。点「刷新」后显示 Swissquote 现货价 |
+| 刷新 | 价格右边的按钮。点一次，向 Swissquote 取一笔现货价 |
+| 自动生成 | 以当前现货价的整数为中心，上下各 7 档 + 中间一档（最多 15 个），写入 Cloudflare |
+| 保存设置 | 写入 Cloudflare，EA 约 3 秒内取回 |
 | 全部清除 | 删除 Cloudflare 上的全部提醒 |
 | 触发通知 | EA 发现穿越后直接发 Telegram，不经过 Cloudflare |
 
@@ -342,7 +341,7 @@ https://api.telegram.org
 | `InpApiBaseUrl` | `https://alertdata.pages.dev` | **不要**末尾斜杠 |
 | `InpApiToken` | （你的 API Token） | 与 Cloudflare Secret 相同 |
 | `InpSymbol` | （留空） | 留空 = 使用当前图表品种 |
-| `InpSyncSeconds` | `15` | 每 15 秒推送价格并拉取提醒。小于 15 会按 15 秒 |
+| `InpSyncSeconds` | `3` | 每 3 秒拉取提醒，不上传价格。小于 3 会按 3 秒。图表上如果还留着旧的 `15`，改成 `3` |
 | `InpEnableTelegram` | `true` | 穿越后由 EA 直接发 Telegram |
 | `InpTelegramBotToken` | BotFather 给的 Token | |
 | `InpTelegramChatId` | 你的 Chat ID | |
@@ -355,12 +354,12 @@ https://api.telegram.org
 打开 MT5 下方 **「专家」(Experts)** 标签，应看到类似：
 
 ```
-[GoldAlert] EA initialized
+[GoldAlert] EA initialized v1.12
+[GoldAlert] Pull alerts every 3s. Price is not uploaded.
 [GoldAlert] Symbol: XAUUSD
 [GoldAlert] API connected
 [GoldAlert] Config version: 1
 [GoldAlert] Loaded 0 alerts
-[GoldAlert] Price: 3978.25
 ```
 
 若出现：
@@ -443,18 +442,18 @@ Telegram 消息示例：
 
 | # | 测试 | 期望结果 |
 |---|------|----------|
-| 1 | EA 挂载并联网 | 网页显示 🟢 EA 在线 + 当前价 |
-| 2 | 手机添加 `4000` 并保存 | EA 日志出现同步到 4000 |
+| 1 | EA 挂载并联网 | Experts 出现 `Pull alerts every 3s` 和 `API connected` |
+| 2 | 手机添加 `4000` 并保存 | EA 约 3 秒内日志出现 Loaded，含 4000 |
 | 3 | 点「设定」 | 生成 15 个价格 |
 | 4 | 间隔改为 `10` 再生成 | 间隔为 10 |
-| 5 | 删除一个价格并保存 | EA 约 15 秒内同步 |
+| 5 | 删除一个价格并保存 | EA 约 3 秒内同步 |
 | 6 | 价格向上穿越 | Telegram 收到 `提醒价 _ 现价`，Experts 出现 ALERT UP |
 | 7 | 价格向下穿越 | Telegram 收到 `提醒价 _ 现价`，Experts 出现 ALERT DOWN |
 | 8 | 同侧持续波动 | **不**重复发送 |
 | 9 | 重新穿越 | 可再次提醒 |
 | 10 | 关闭手机网页 | EA 仍继续工作 |
-| 11 | 关闭 EA，等超过约 45 秒 | 网页 🔴 EA 离线 |
-| 12 | 重启 EA | 网页恢复 🟢 EA 在线 |
+| 11 | 点「刷新」 | 价格变成 Swissquote 现货价 |
+| 12 | 关掉网页再打开 | 价格回到 `--`，已保存的提醒还在 |
 
 ---
 
@@ -466,13 +465,11 @@ Telegram 消息示例：
 
 ### Q: 如何远程暂停 EA 提醒？
 
-电脑上的 MT5 无法从网页直接关闭。网页有 **暂停提醒 / 恢复提醒**：暂停后 EA 仍上传价格（显示在线），但约 15 秒内不再触发 Telegram。恢复后继续按已选中的价格提醒。
+电脑上的 MT5 无法从网页直接关闭。网页有 **暂停提醒 / 恢复提醒**：暂停后 EA 约 3 秒内不再触发 Telegram。恢复后继续按已选中的价格提醒。
 
-### Q: 网页显示 EA 离线
+### Q: 怎么确认 EA 在取提醒？
 
-1. 确认 EA 已挂载且 Algo Trading 为绿色  
-2. 确认 `InpApiBaseUrl` / `InpApiToken` 正确  
-3. 查看 Experts 日志是否有 WebRequest 错误  
+网页不再显示在线或离线。看 MT5 Experts：应有 `EA initialized v1.12`、`Pull alerts every 3s`、`API connected`。保存提醒后约 3 秒出现新的 `Loaded`。
 
 ### Q: 收不到 Telegram
 

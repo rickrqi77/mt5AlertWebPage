@@ -7,13 +7,11 @@
   "use strict";
 
   const MAX_ALERTS = 15;
-  const REFRESH_MS = 15000;
   const TOKEN_KEY = "gold_alert_api_token";
   const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10;
 
   /** @type {Array<{id?: number|null, price: string, enabled: boolean, triggered: boolean}>} */
   let localAlerts = [];
-  let refreshTimer = null;
   let toastTimer = null;
   let stepHydrated = false;
   let capturedStep = null;
@@ -21,7 +19,7 @@
   let alertsDirty = false;
   let warmupPromise = null;
   let dataReady = false;
-  let spotHoldUntil = 0;
+  let spotPrice = null;
 
   const $ = (id) => document.getElementById(id);
 
@@ -126,7 +124,6 @@
   }
 
   function showTokenAuth() {
-    stopRefresh();
     $("auth-screen").classList.remove("hidden");
     $("app-screen").classList.add("hidden");
     $("auth-hint").textContent = "新设备输入一次 Token，本机以后不用再输入";
@@ -140,11 +137,11 @@
   function showApp() {
     $("auth-screen").classList.add("hidden");
     $("app-screen").classList.remove("hidden");
-    startWarmupAndPoll();
   }
 
   function enterApp() {
     showApp();
+    startWarmupAndPoll();
   }
 
   async function unlock() {
@@ -162,7 +159,7 @@
       showAuthError("Token 无效");
       return;
     }
-    enterApp();
+    showApp();
   }
 
   // -------------------------------------------------------------------------
@@ -246,20 +243,6 @@
       toast(e.message, "error");
     } finally {
       $("btn-pause").disabled = false;
-    }
-  }
-
-  function renderEaStatus(online) {
-    const el = $("ea-status");
-    const text = $("ea-status-text");
-    if (online) {
-      el.classList.add("online");
-      el.classList.remove("offline");
-      text.textContent = "🟢 EA 在线";
-    } else {
-      el.classList.add("offline");
-      el.classList.remove("online");
-      text.textContent = "🔴 EA 离线";
     }
   }
 
@@ -371,20 +354,10 @@
     $("ask").textContent = formatPrice(data.ask);
   }
 
-  async function refreshStatus() {
-    const data = await api("/api/status");
-    $("symbol").textContent = data.symbol || "XAUUSD";
-    if (Date.now() >= spotHoldUntil) {
-      showQuote(data);
-      $("price-label").textContent = "当前价格";
-      $("last-refresh").textContent =
-        "刷新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
-    }
-    renderEaStatus(!!data.ea_online);
+  async function loadSettings() {
+    const data = await api("/api/settings");
     alertsPaused = !!data.paused || data.alerts_enabled === false;
     renderPauseButton();
-    // Do not overwrite the interval the user is editing. Status polling used to
-    // reset the box back to the last saved server value (often 5).
     if (!stepHydrated && data.step != null) {
       setStepInput(data.step);
       stepHydrated = true;
@@ -397,13 +370,15 @@
     btn.disabled = true;
     try {
       const data = await api("/api/spot");
+      spotPrice = Number(data.price);
       showQuote(data);
-      spotHoldUntil = Date.now() + 15000;
-      $("price-label").textContent = "现货价格";
+      $("price-label").textContent = "当前价格";
       $("last-refresh").textContent =
-        "现货 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+        "刷新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+      return Number.isFinite(spotPrice) && spotPrice > 0;
     } catch (e) {
       toast(e.message || "现货价格暂时取不到", "error");
+      return false;
     } finally {
       btn.disabled = false;
     }
@@ -430,7 +405,7 @@
   async function refreshAll() {
     try {
       await Promise.all([
-        refreshStatus(),
+        loadSettings(),
         canReloadAlertsFromServer()
           ? loadAlerts({ skipIfUnchanged: true })
           : Promise.resolve(),
@@ -458,10 +433,7 @@
 
   function startWarmupAndPoll() {
     if (!getToken()) return;
-    warmupData().finally(function () {
-      if (!getToken()) return;
-      if (!refreshTimer) startRefresh();
-    });
+    warmupData();
   }
 
   function onPageVisible() {
@@ -469,20 +441,6 @@
     if ($("app-screen").classList.contains("hidden")) return;
     alertsDirty = false;
     warmupData();
-  }
-
-  function startRefresh() {
-    stopRefresh();
-    refreshTimer = setInterval(() => {
-      refreshAll().catch(() => {});
-    }, REFRESH_MS);
-  }
-
-  function stopRefresh() {
-    if (refreshTimer) {
-      clearInterval(refreshTimer);
-      refreshTimer = null;
-    }
   }
 
   // -------------------------------------------------------------------------
@@ -577,8 +535,7 @@
       alertsDirty = false;
       renderAlerts();
       setStepInput(step);
-      toast("设置已保存，已同步到 EA", "success");
-      await refreshStatus();
+      toast("设置已保存，EA 约 3 秒内取回", "success");
     } catch (e) {
       toast(e.message, "error");
     } finally {
@@ -596,29 +553,22 @@
 
     try {
       $("btn-auto").disabled = true;
-      // Check EA online first for clearer UX
-      const status = await api("/api/status");
-      if (!status.ea_online) {
-        toast("EA当前离线，无法获取最新黄金价格。", "error");
-        return;
+      if (!Number.isFinite(spotPrice) || spotPrice <= 0) {
+        const ok = await refreshSpot();
+        if (!ok) return;
       }
 
       const data = await api("/api/alerts/auto", {
         method: "POST",
-        body: JSON.stringify({ step }),
+        body: JSON.stringify({ step, price: spotPrice }),
       });
       localAlerts = mapAlerts(data.alerts);
       alertsDirty = false;
       renderAlerts();
       setStepInput(data.step != null ? data.step : step);
       toast(data.message || "已生成，默认全部触发", "success");
-      await refreshStatus();
     } catch (e) {
-      if (e.code === "EA_OFFLINE" || (e.data && e.data.code === "EA_OFFLINE")) {
-        toast("EA当前离线，无法获取最新黄金价格。", "error");
-      } else {
-        toast(e.message, "error");
-      }
+      toast(e.message, "error");
     } finally {
       $("btn-auto").disabled = false;
     }
