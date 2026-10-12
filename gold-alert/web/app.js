@@ -1,14 +1,15 @@
 /**
  * GOLD ALERT - Mobile web client
- * API Token is entered by user and stored in localStorage on this device.
+ * Token is entered once per device and remembered; new devices must enter it first.
  */
 
 (function () {
   "use strict";
 
-  const MAX_ALERTS = 11;
+  const MAX_ALERTS = 15;
   const REFRESH_MS = 1000;
   const TOKEN_KEY = "gold_alert_api_token";
+  const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10;
 
   /** @type {Array<{id?: number|null, price: string, enabled: boolean, triggered: boolean}>} */
   let localAlerts = [];
@@ -18,6 +19,8 @@
   let capturedStep = null;
   let alertsPaused = false;
   let alertsDirty = false;
+  let warmupPromise = null;
+  let dataReady = false;
 
   const $ = (id) => document.getElementById(id);
 
@@ -25,58 +28,140 @@
   // Auth
   // -------------------------------------------------------------------------
 
-  function getToken() {
-    var token = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || "";
-    if (token && !localStorage.getItem(TOKEN_KEY)) {
-      localStorage.setItem(TOKEN_KEY, token);
+  function cookieFlags() {
+    var flags = "; Path=/; SameSite=Lax; Max-Age=" + TOKEN_COOKIE_MAX_AGE;
+    if (location.protocol === "https:") flags += "; Secure";
+    return flags;
+  }
+
+  function readCookie(name) {
+    var parts = ("; " + document.cookie).split("; " + name + "=");
+    if (parts.length < 2) return "";
+    return decodeURIComponent(parts.pop().split(";").shift() || "");
+  }
+
+  function writeCookie(name, value) {
+    document.cookie = name + "=" + encodeURIComponent(value) + cookieFlags();
+  }
+
+  function deleteCookie(name) {
+    document.cookie = name + "=; Path=/; SameSite=Lax; Max-Age=0";
+  }
+
+  function persistKey(key, value) {
+    if (!value) return;
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* Safari private mode may block localStorage */
     }
-    return token;
+    writeCookie(key, value);
+  }
+
+  function persistToken(token) {
+    persistKey(TOKEN_KEY, token);
+  }
+
+  function readStored(key) {
+    var value = "";
+    try {
+      value = localStorage.getItem(key) || "";
+    } catch {
+      value = "";
+    }
+    if (!value) {
+      try {
+        value = sessionStorage.getItem(key) || "";
+      } catch {
+        value = "";
+      }
+    }
+    if (!value) value = readCookie(key);
+    if (value) persistKey(key, value);
+    return value;
+  }
+
+  function getToken() {
+    return readStored(TOKEN_KEY);
   }
 
   function setToken(token) {
-    localStorage.setItem(TOKEN_KEY, token);
-    sessionStorage.removeItem(TOKEN_KEY);
+    persistToken(token);
+    try {
+      sessionStorage.removeItem(TOKEN_KEY);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function clearStored(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+    deleteCookie(key);
   }
 
   function clearToken() {
-    localStorage.removeItem(TOKEN_KEY);
-    sessionStorage.removeItem(TOKEN_KEY);
+    clearStored(TOKEN_KEY);
+  }
+
+  function hideAuthError() {
+    var errEl = $("auth-error");
+    errEl.classList.add("hidden");
+    errEl.textContent = "";
+  }
+
+  function showAuthError(msg) {
+    var errEl = $("auth-error");
+    errEl.textContent = msg;
+    errEl.classList.remove("hidden");
+  }
+
+  function showTokenAuth() {
+    stopRefresh();
+    $("auth-screen").classList.remove("hidden");
+    $("app-screen").classList.add("hidden");
+    $("auth-hint").textContent = "新设备输入一次 Token，本机以后不用再输入";
+    hideAuthError();
   }
 
   function showAuth() {
-    $("auth-screen").classList.remove("hidden");
-    $("app-screen").classList.add("hidden");
-    stopRefresh();
+    showTokenAuth();
   }
 
   function showApp() {
     $("auth-screen").classList.add("hidden");
     $("app-screen").classList.remove("hidden");
-    startRefresh();
-    refreshAll();
+    startWarmupAndPoll();
+  }
+
+  function enterApp() {
+    showApp();
   }
 
   async function unlock() {
     const token = ($("token-input").value || "").trim();
-    const errEl = $("auth-error");
-    errEl.classList.add("hidden");
+    hideAuthError();
 
     if (!token) {
-      errEl.textContent = "请输入 API Token";
-      errEl.classList.remove("hidden");
+      showAuthError("请输入 API Token");
       return;
     }
 
     setToken(token);
-    try {
-      await api("/api/status");
-      showApp();
-      await loadAlerts();
-    } catch (e) {
-      clearToken();
-      errEl.textContent = e.message === "Unauthorized" ? "Token 无效" : e.message;
-      errEl.classList.remove("hidden");
+    await warmupData();
+    if (!getToken()) {
+      showAuthError("Token 无效");
+      return;
     }
+    enterApp();
   }
 
   // -------------------------------------------------------------------------
@@ -319,25 +404,46 @@
 
   async function refreshAll() {
     try {
-      await refreshStatus();
-      if (canReloadAlertsFromServer()) {
-        await loadAlerts({ skipIfUnchanged: true });
-      }
+      await Promise.all([
+        refreshStatus(),
+        canReloadAlertsFromServer()
+          ? loadAlerts({ skipIfUnchanged: true })
+          : Promise.resolve(),
+      ]);
+      dataReady = true;
     } catch (e) {
       if (e.message === "Unauthorized") {
+        dataReady = false;
         clearToken();
-        showAuth();
+        showTokenAuth();
         return;
       }
       console.warn("refresh failed", e);
     }
   }
 
+  function warmupData() {
+    if (!getToken()) return Promise.resolve();
+    if (warmupPromise) return warmupPromise;
+    warmupPromise = refreshAll().finally(function () {
+      warmupPromise = null;
+    });
+    return warmupPromise;
+  }
+
+  function startWarmupAndPoll() {
+    if (!getToken()) return;
+    warmupData().finally(function () {
+      if (!getToken()) return;
+      if (!refreshTimer) startRefresh();
+    });
+  }
+
   function onPageVisible() {
     if (!getToken()) return;
     if ($("app-screen").classList.contains("hidden")) return;
     alertsDirty = false;
-    refreshAll().catch(function () {});
+    warmupData();
   }
 
   function startRefresh() {
@@ -522,7 +628,8 @@
     });
     $("btn-logout").addEventListener("click", () => {
       clearToken();
-      showAuth();
+      $("token-input").value = "";
+      showTokenAuth();
     });
     $("btn-save").addEventListener("pointerdown", rememberStep);
     $("btn-save").addEventListener("click", saveAlerts);
@@ -537,26 +644,14 @@
     window.addEventListener("pageshow", onPageVisible);
   }
 
-  async function init() {
+  function init() {
     bindEvents();
-    const token = getToken();
-    if (!token) {
-      showAuth();
+    if (!getToken()) {
+      showTokenAuth();
       return;
     }
-    try {
-      await api("/api/status");
-      showApp();
-      await loadAlerts();
-    } catch {
-      clearToken();
-      showAuth();
-    }
+    enterApp();
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  init();
 })();

@@ -12,6 +12,7 @@
   --blue: #3a7bd5;
   --danger: #c0392b;
   --radius: 12px;
+  --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --font: "SF Pro Display", "Helvetica Neue", Helvetica, Arial, sans-serif;
 }
@@ -39,12 +40,21 @@ body {
     radial-gradient(ellipse 120% 60% at 50% -10%, rgba(212, 160, 23, 0.12), transparent 55%),
     linear-gradient(180deg, #111 0%, var(--bg) 40%);
   min-height: 100dvh;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+
+@media (display-mode: standalone) {
+  body {
+    /* iPhone home-screen shortcut: keep content below Dynamic Island / status bar */
+    padding-top: max(var(--safe-top), 54px);
+  }
 }
 
 .screen {
   max-width: 480px;
   margin: 0 auto;
-  padding: 20px 16px calc(28px + var(--safe-bottom));
+  padding: 14px 16px 16px;
 }
 
 .hidden {
@@ -53,7 +63,7 @@ body {
 
 /* Auth */
 .auth-box {
-  margin-top: 18vh;
+  margin-top: 10vh;
   padding: 28px 20px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
@@ -64,6 +74,8 @@ body {
   color: var(--text-dim);
   margin: 12px 0 20px;
   font-size: 15px;
+  text-align: center;
+  line-height: 1.45;
 }
 
 /* Brand */
@@ -80,9 +92,9 @@ body {
 }
 
 .brand-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   object-fit: cover;
   flex-shrink: 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
@@ -106,11 +118,11 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 20px;
+  margin-bottom: 8px;
 }
 
 .header .brand {
-  font-size: 22px;
+  font-size: 18px;
   text-align: left;
 }
 
@@ -127,25 +139,25 @@ body {
 /* Hero price */
 .hero-price {
   text-align: center;
-  padding: 24px 12px 28px;
-  margin-bottom: 8px;
+  padding: 6px 12px 10px;
+  margin-bottom: 4px;
 }
 
 .symbol {
-  font-size: 14px;
+  font-size: 12px;
   letter-spacing: 0.2em;
   color: var(--gold-soft);
-  margin-bottom: 8px;
+  margin-bottom: 2px;
 }
 
 .hero-price .label {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-dim);
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 
 .price {
-  font-size: 52px;
+  font-size: 40px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
@@ -157,7 +169,7 @@ body {
   display: flex;
   justify-content: center;
   gap: 24px;
-  margin-top: 12px;
+  margin-top: 4px;
   font-size: 13px;
   color: var(--text-dim);
 }
@@ -172,8 +184,8 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-top: 18px;
-  padding: 10px 18px;
+  margin-top: 8px;
+  padding: 6px 14px;
   border-radius: 999px;
   font-size: 15px;
   font-weight: 600;
@@ -224,8 +236,8 @@ body {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 16px;
-  margin-bottom: 14px;
+  padding: 12px;
+  margin-bottom: 10px;
 }
 
 .panel-title-row {
@@ -329,10 +341,16 @@ body {
 }
 
 .actions-save {
-  margin: 0 0 14px;
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+  margin: 0 0 10px;
 }
 
-.actions-save .btn-block {
+.actions-save .btn {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
   margin-top: 0;
 }
 
@@ -434,15 +452,10 @@ body {
 }
 
 .actions-bottom {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
+  display: block;
 }
 
-.actions-bottom .btn {
-  flex: 1 1 0;
-  width: auto;
-  min-width: 0;
+.actions-bottom .btn-block {
   margin-top: 0;
 }
 
@@ -492,7 +505,7 @@ body {
 }
 
 .footer {
-  margin-top: 24px;
+  margin-top: 12px;
   text-align: center;
   font-size: 12px;
   color: var(--text-dim);
