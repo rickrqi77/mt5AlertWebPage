@@ -6,7 +6,7 @@
 (function () {
   "use strict";
 
-  const MAX_ALERTS = 11;
+  const MAX_ALERTS = 15;
   const REFRESH_MS = 1000;
   const TOKEN_KEY = "gold_alert_api_token";
   const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10;

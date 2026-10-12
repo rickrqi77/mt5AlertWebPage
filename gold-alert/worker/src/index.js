@@ -8,7 +8,8 @@
  */
 
 const EA_OFFLINE_SECONDS = 15;
-const MAX_ALERTS = 11;
+const MAX_ALERTS = 15;
+const AUTO_GRID_SIDE = 7;
 
 export default {
   async fetch(request, env, ctx) {
@@ -289,11 +290,11 @@ async function autoGenerateAlerts(request, env) {
   const base = Math.trunc(currentPrice);
   const prices = [];
 
-  for (let i = 5; i >= 1; i--) {
+  for (let i = AUTO_GRID_SIDE; i >= 1; i--) {
     prices.push({ price: roundPrice(base - step * i), enabled: 1 });
   }
   prices.push({ price: roundPrice(base), enabled: 0 });
-  for (let i = 1; i <= 5; i++) {
+  for (let i = 1; i <= AUTO_GRID_SIDE; i++) {
     prices.push({ price: roundPrice(base + step * i), enabled: 1 });
   }
 

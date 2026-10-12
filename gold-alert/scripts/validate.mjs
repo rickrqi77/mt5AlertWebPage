@@ -7,12 +7,14 @@ function roundPrice(p) {
   return Math.round(p * 100000) / 100000;
 }
 
+const AUTO_GRID_SIDE = 7;
+
 function autoGenerate(currentPrice, step) {
   const base = Math.trunc(currentPrice);
   const prices = [];
-  for (let i = 5; i >= 1; i--) prices.push({ price: roundPrice(base - step * i), enabled: 1 });
+  for (let i = AUTO_GRID_SIDE; i >= 1; i--) prices.push({ price: roundPrice(base - step * i), enabled: 1 });
   prices.push({ price: roundPrice(base), enabled: 0 });
-  for (let i = 1; i <= 5; i++) prices.push({ price: roundPrice(base + step * i), enabled: 1 });
+  for (let i = 1; i <= AUTO_GRID_SIDE; i++) prices.push({ price: roundPrice(base + step * i), enabled: 1 });
   return prices;
 }
 
@@ -21,22 +23,22 @@ function assert(cond, msg) {
 }
 
 const p1 = autoGenerate(4181.2, 5);
-assert(p1.length === 11, "expected 11 alerts");
-assert(p1[5].price === 4181 && p1[5].enabled === 0, "base off");
-assert(p1[0].price === 4156 && p1[0].enabled === 1, `got ${p1[0].price}`);
-assert(p1[4].price === 4176, `got ${p1[4].price}`);
-assert(p1[6].price === 4186 && p1[6].enabled === 1, `got ${p1[6].price}`);
-assert(p1[10].price === 4206, `got ${p1[10].price}`);
+assert(p1.length === 15, "expected 15 alerts");
+assert(p1[7].price === 4181 && p1[7].enabled === 0, "base off");
+assert(p1[0].price === 4146 && p1[0].enabled === 1, `got ${p1[0].price}`);
+assert(p1[6].price === 4176, `got ${p1[6].price}`);
+assert(p1[8].price === 4186 && p1[8].enabled === 1, `got ${p1[8].price}`);
+assert(p1[14].price === 4216, `got ${p1[14].price}`);
 
 const p2 = autoGenerate(4181.2, 10);
-assert(p2[0].price === 4131, `step10 low got ${p2[0].price}`);
-assert(p2[5].price === 4181 && p2[5].enabled === 0, "base off");
-assert(p2[10].price === 4231, `step10 high got ${p2[10].price}`);
+assert(p2[0].price === 4111, `step10 low got ${p2[0].price}`);
+assert(p2[7].price === 4181 && p2[7].enabled === 0, "base off");
+assert(p2[14].price === 4251, `step10 high got ${p2[14].price}`);
 
 const p3 = autoGenerate(3978.25, 5);
-assert(p3[5].price === 3978 && p3[5].enabled === 0, `got ${p3[5].price}`);
-assert(p3[4].price === 3973, `got ${p3[4].price}`);
-assert(p3[6].price === 3983, `got ${p3[6].price}`);
+assert(p3[7].price === 3978 && p3[7].enabled === 0, `got ${p3[7].price}`);
+assert(p3[6].price === 3973, `got ${p3[6].price}`);
+assert(p3[8].price === 3983, `got ${p3[8].price}`);
 
 // Cross logic (mirror EA)
 function checkCross(prev, curr, ap, side) {
