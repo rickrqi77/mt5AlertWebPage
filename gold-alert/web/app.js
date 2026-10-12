@@ -24,6 +24,8 @@
   let patternDrawing = false;
   let patternCursor = { x: 0, y: 0 };
   let patternResetTimer = null;
+  let warmupPromise = null;
+  let dataReady = false;
 
   const $ = (id) => document.getElementById(id);
 
@@ -138,7 +140,6 @@
   }
 
   function showPatternAuth() {
-    stopRefresh();
     $("auth-screen").classList.remove("hidden");
     $("app-screen").classList.add("hidden");
     $("token-panel").classList.add("hidden");
@@ -146,6 +147,7 @@
     $("auth-hint").textContent = "滑动解锁";
     hideAuthError();
     resetPattern(true);
+    startWarmupAndPoll();
   }
 
   function showAuth() {
@@ -155,18 +157,11 @@
   function showApp() {
     $("auth-screen").classList.add("hidden");
     $("app-screen").classList.remove("hidden");
-    startRefresh();
-    refreshAll();
+    startWarmupAndPoll();
   }
 
   function enterApp() {
     showApp();
-    loadAlerts().catch(function (e) {
-      if (e.message === "Unauthorized") {
-        clearToken();
-        showTokenAuth();
-      }
-    });
   }
 
   function patternDots() {
@@ -348,15 +343,8 @@
     }
 
     setToken(token);
-    try {
-      await api("/api/status");
-    } catch (e) {
-      if (e.message === "Unauthorized") {
-        clearToken();
-        showAuthError("Token 无效");
-        return;
-      }
-    }
+    await warmupData();
+    if (!getToken()) return;
     enterApp();
   }
 
@@ -600,12 +588,16 @@
 
   async function refreshAll() {
     try {
-      await refreshStatus();
-      if (canReloadAlertsFromServer()) {
-        await loadAlerts({ skipIfUnchanged: true });
-      }
+      await Promise.all([
+        refreshStatus(),
+        canReloadAlertsFromServer()
+          ? loadAlerts({ skipIfUnchanged: true })
+          : Promise.resolve(),
+      ]);
+      dataReady = true;
     } catch (e) {
       if (e.message === "Unauthorized") {
+        dataReady = false;
         clearToken();
         showTokenAuth();
         return;
@@ -614,11 +606,33 @@
     }
   }
 
+  function warmupData() {
+    if (!getToken()) return Promise.resolve();
+    if (warmupPromise) return warmupPromise;
+    warmupPromise = refreshAll().finally(function () {
+      warmupPromise = null;
+    });
+    return warmupPromise;
+  }
+
+  function startWarmupAndPoll() {
+    if (!getToken()) return;
+    warmupData().finally(function () {
+      if (!getToken()) return;
+      if (!refreshTimer) startRefresh();
+    });
+  }
+
   function onPageVisible() {
     if (!getToken()) return;
-    if ($("app-screen").classList.contains("hidden")) return;
+    if (
+      $("app-screen").classList.contains("hidden") &&
+      $("pattern-panel").classList.contains("hidden")
+    ) {
+      return;
+    }
     alertsDirty = false;
-    refreshAll().catch(function () {});
+    warmupData();
   }
 
   function startRefresh() {
