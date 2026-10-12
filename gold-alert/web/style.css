@@ -40,12 +40,21 @@ body {
     radial-gradient(ellipse 120% 60% at 50% -10%, rgba(212, 160, 23, 0.12), transparent 55%),
     linear-gradient(180deg, #111 0%, var(--bg) 40%);
   min-height: 100dvh;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+
+@media (display-mode: standalone) {
+  body {
+    /* iPhone home-screen shortcut: keep content below Dynamic Island / status bar */
+    padding-top: max(var(--safe-top), 54px);
+  }
 }
 
 .screen {
   max-width: 480px;
   margin: 0 auto;
-  padding: calc(8px + var(--safe-top)) 16px calc(16px + var(--safe-bottom));
+  padding: 14px 16px 16px;
 }
 
 .hidden {
