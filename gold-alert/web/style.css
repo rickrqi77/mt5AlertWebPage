@@ -394,6 +394,12 @@ body {
   border: 1px solid var(--gold);
 }
 
+.btn-arm.used {
+  background: transparent;
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+
 .btn-arm.off {
   background: #222;
   color: var(--text-dim);

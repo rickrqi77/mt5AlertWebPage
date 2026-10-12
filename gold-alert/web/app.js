@@ -20,6 +20,7 @@
   let warmupPromise = null;
   let dataReady = false;
   let spotPrice = null;
+  let usageTimer = null;
 
   const $ = (id) => document.getElementById(id);
 
@@ -262,6 +263,7 @@
     list.innerHTML = "";
     localAlerts.forEach((a, idx) => {
       const on = !!a.enabled;
+      const used = !on && !!a.triggered;
       const li = document.createElement("li");
       li.className = "alert-item";
       li.innerHTML =
@@ -275,11 +277,11 @@
         idx +
         '" />' +
         '<button type="button" class="btn-arm ' +
-        (on ? "on" : "off") +
+        (used ? "used" : on ? "on" : "off") +
         '" data-idx="' +
         idx +
         '">' +
-        (on ? "触发" : "关闭") +
+        (used ? "已用" : on ? "触发" : "关闭") +
         "</button>" +
         '<button type="button" class="btn-delete" data-idx="' +
         idx +
@@ -375,12 +377,40 @@
       $("price-label").textContent = "当前价格";
       $("last-refresh").textContent =
         "刷新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+      if (data.usage_request) scheduleUsageOnce(data.usage_request);
       return Number.isFinite(spotPrice) && spotPrice > 0;
     } catch (e) {
       toast(e.message || "现货价格暂时取不到", "error");
       return false;
     } finally {
       btn.disabled = false;
+    }
+  }
+
+  function scheduleUsageOnce(requestId) {
+    if (usageTimer) clearTimeout(usageTimer);
+    usageTimer = setTimeout(function () {
+      usageTimer = null;
+      loadUsageOnce(requestId);
+    }, 5000);
+  }
+
+  async function loadUsageOnce(requestId) {
+    if (!requestId || !canReloadAlertsFromServer()) return;
+    try {
+      const data = await api("/api/alerts");
+      if (Number(data.usage_reported) !== Number(requestId)) return;
+      const next = mapAlerts(data.alerts);
+      if (alertsFingerprint(next) === alertsFingerprint(localAlerts)) return;
+      localAlerts = next;
+      alertsDirty = false;
+      renderAlerts();
+      toast("已更新提醒使用情况", "success");
+    } catch (e) {
+      if (e.message === "Unauthorized") {
+        clearToken();
+        showTokenAuth();
+      }
     }
   }
 

@@ -6,7 +6,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.13"
+#property version   "1.14"
 #property description "XAUUSD gold price alert EA. Pulls Cloudflare alerts on a timer. Does not upload price. Telegram sent by the EA."
 
 //--- inputs
@@ -47,6 +47,7 @@ datetime   g_lastSyncTime   = 0;
 datetime   g_lastErrorLog   = 0;
 bool       g_filePaused     = false;
 int        g_syncSeconds    = 0;
+int        g_reportedUsage  = 0;
 
 int  ResolveSyncSeconds();
 bool ApplySyncInterval(const bool startup);
@@ -56,7 +57,7 @@ bool ApplySyncInterval(const bool startup);
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(LOG_PREFIX, "EA initialized v1.13");
+   Print(LOG_PREFIX, "EA initialized v1.14");
    if(InpEnableTelegram && StringLen(InpTelegramBotToken) > 0 && StringLen(InpTelegramChatId) > 0)
       Print(LOG_PREFIX, "Telegram: on (direct, not via Cloudflare)");
    else
@@ -503,6 +504,38 @@ bool PostHeartbeat(const double bid, const double ask, const double price)
 }
 
 //+------------------------------------------------------------------+
+//| One usage report per web refresh. Flag comes from /api/config.  |
+//+------------------------------------------------------------------+
+void ReportUsageOnce(const int requestId)
+{
+   if(requestId <= 0 || requestId == g_reportedUsage)
+      return;
+
+   string body = "{\"request_id\":" + IntegerToString(requestId) + ",\"alerts\":[";
+   bool first = true;
+   for(int i = 0; i < g_alertCount; i++)
+   {
+      if(!g_alerts[i].valid || g_alerts[i].id <= 0)
+         continue;
+      if(!first)
+         body += ",";
+      first = false;
+      body += "{\"id\":" + IntegerToString(g_alerts[i].id);
+      body += ",\"enabled\":";
+      body += (g_alerts[i].enabled ? "true" : "false");
+      body += "}";
+   }
+   body += "]}";
+
+   string resp;
+   int status;
+   if(!HttpRequest("POST", NormalizeBaseUrl() + "/api/ea/usage", body, resp, status))
+      return;
+   g_reportedUsage = requestId;
+   Print(LOG_PREFIX, "Reported alert usage once");
+}
+
+//+------------------------------------------------------------------+
 //| GET /api/config                                                  |
 //+------------------------------------------------------------------+
 bool FetchConfig(const double currentPrice)
@@ -529,11 +562,16 @@ bool FetchConfig(const double currentPrice)
       return false;
    }
 
+   int usageReq = JsonGetInt(resp, "usage_request", 0);
+
    if(version == g_configVersion && g_alertCount >= 0 && g_configVersion >= 0)
    {
-      // No change
+      ReportUsageOnce(usageReq);
       return true;
    }
+
+   // Report the EA's current used/armed state before replacing it with a new config.
+   ReportUsageOnce(usageReq);
 
    bool alertsEnabled = JsonGetBool(resp, "alerts_enabled", true);
    g_filePaused = !alertsEnabled;

@@ -265,7 +265,7 @@ https://gold-alert.xxxxx.workers.dev
 EA 每 3 秒向 Cloudflare 拉取已保存的提醒，不上传现价。网页打开时不取价格；点「刷新」才向 Swissquote 要一次现货价。设定和保存写入 Cloudflare。价格穿越后，EA 直接把消息发给 Telegram。
 
 - 手机网页：`https://alertdata.pages.dev/`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.13）
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.14）
 
 ---
 
@@ -282,7 +282,7 @@ EA 每 3 秒向 Cloudflare 拉取已保存的提醒，不上传现价。网页�
 | 功能 | 说明 |
 |------|------|
 | 当前价格 | 打开页面时是 `--`。点「刷新」后显示 Swissquote 现货价 |
-| 刷新 | 价格右边的按钮。点一次，向 Swissquote 取一笔现货价 |
+| 刷新 | 点一次，向 Swissquote 取一笔现货价，并请 EA 在下次取提醒时回报一次哪些提醒已经用过。页面约 5 秒后取回这一次。不再点刷新，EA 就不再回报 |
 | 自动生成 | 以当前现货价的整数为中心，上下各 7 档 + 中间一档（最多 15 个），写入 Cloudflare |
 | 保存设置 | 写入 Cloudflare，EA 约 3 秒内取回 |
 | 全部清除 | 删除 Cloudflare 上的全部提醒 |
@@ -351,7 +351,7 @@ https://api.telegram.org
 
 ### 11.4b 在电脑上改取提醒间隔
 
-EA 为 v1.13 并正在运行时，不用打开 MT5 参数。
+EA 为 v1.14 并正在运行时，不用打开 MT5 参数。
 
 1. 下载并双击：`https://alertdata.pages.dev/set-alert-interval.bat`
 2. 输入秒数（3 到 3600），回车
@@ -364,7 +364,7 @@ EA 为 v1.13 并正在运行时，不用打开 MT5 参数。
 打开 MT5 下方 **「专家」(Experts)** 标签，应看到类似：
 
 ```
-[GoldAlert] EA initialized v1.13
+[GoldAlert] EA initialized v1.14
 [GoldAlert] Pull alerts every 3s. Price is not uploaded.
 [GoldAlert] Symbol: XAUUSD
 [GoldAlert] API connected

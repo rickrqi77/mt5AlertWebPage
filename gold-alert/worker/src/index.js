@@ -13,6 +13,33 @@ const AUTO_GRID_SIDE = 7;
 const SWISSQUOTE_XAU_URL =
   "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAU/USD";
 
+let usageColumnsReady = false;
+
+async function ensureUsageColumns(env) {
+  if (usageColumnsReady) return;
+  try {
+    await env.DB.prepare(
+      "SELECT usage_request, usage_reported FROM system_status WHERE id = 1"
+    ).first();
+  } catch {
+    try {
+      await env.DB.prepare(
+        "ALTER TABLE system_status ADD COLUMN usage_request INTEGER NOT NULL DEFAULT 0"
+      ).run();
+    } catch {
+      /* column already exists */
+    }
+    try {
+      await env.DB.prepare(
+        "ALTER TABLE system_status ADD COLUMN usage_reported INTEGER NOT NULL DEFAULT 0"
+      ).run();
+    } catch {
+      /* column already exists */
+    }
+  }
+  usageColumnsReady = true;
+}
+
 export default {
   async fetch(request, env, ctx) {
     try {
@@ -58,7 +85,10 @@ async function handleApi(request, env, url) {
     return await getStatus(env);
   }
   if (method === "GET" && path === "/api/spot") {
-    return await getSpot();
+    return await getSpot(env);
+  }
+  if (method === "POST" && path === "/api/ea/usage") {
+    return await reportAlertUsage(request, env);
   }
   if (method === "GET" && path === "/api/alerts") {
     return await getAlerts(env);
@@ -181,7 +211,7 @@ function pickSwissquoteQuote(payload) {
   return fallback;
 }
 
-async function getSpot() {
+async function getSpot(env) {
   let payload;
   try {
     const res = await fetch(SWISSQUOTE_XAU_URL, {
@@ -200,21 +230,92 @@ async function getSpot() {
     return json({ error: "现货价格暂时取不到" }, 502);
   }
 
+  const usageRequest = await requestUsageReport(env);
   return json({
     symbol: "XAUUSD",
     price: quote.price,
     bid: quote.bid,
     ask: quote.ask,
     source: "swissquote",
+    usage_request: usageRequest,
   });
 }
 
+async function requestUsageReport(env) {
+  await ensureUsageColumns(env);
+  await env.DB.prepare(
+    "UPDATE system_status SET usage_request = usage_request + 1 WHERE id = 1"
+  ).run();
+  const row = await env.DB.prepare(
+    "SELECT usage_request FROM system_status WHERE id = 1"
+  ).first();
+  return row?.usage_request || 0;
+}
+
+async function reportAlertUsage(request, env) {
+  await ensureUsageColumns(env);
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const requestId = Number(body.request_id);
+  const alerts = Array.isArray(body.alerts) ? body.alerts : null;
+  if (!Number.isInteger(requestId) || requestId <= 0 || !alerts) {
+    return json({ error: "request_id and alerts required" }, 400);
+  }
+
+  const status = await env.DB.prepare(
+    "SELECT usage_request, usage_reported FROM system_status WHERE id = 1"
+  ).first();
+  if (!status || requestId !== status.usage_request || requestId === status.usage_reported) {
+    return json({ ok: true, ignored: true });
+  }
+
+  const statements = [];
+  for (const item of alerts) {
+    const id = Number(item.id);
+    if (!Number.isInteger(id) || id <= 0) continue;
+    const enabled = item.enabled === true || item.enabled === 1;
+    const existing = await env.DB.prepare(
+      "SELECT enabled, triggered FROM alerts WHERE id = ?"
+    ).bind(id).first();
+    if (!existing) continue;
+    const wasEnabled = existing.enabled === 1 || existing.enabled === true;
+    const triggered = !enabled && wasEnabled ? 1 : enabled ? 0 : existing.triggered ? 1 : 0;
+    statements.push(
+      env.DB.prepare(
+        "UPDATE alerts SET enabled = ?, triggered = ?, updated_at = datetime('now') WHERE id = ?"
+      ).bind(enabled ? 1 : 0, triggered, id)
+    );
+  }
+  statements.push(
+    env.DB.prepare(
+      "UPDATE system_status SET usage_reported = ? WHERE id = 1"
+    ).bind(requestId)
+  );
+  if (statements.length > 0) await env.DB.batch(statements);
+
+  return json({ ok: true, usage_reported: requestId });
+}
+
 async function getAlerts(env) {
+  await ensureUsageColumns(env);
   const { results } = await env.DB.prepare(
     "SELECT id, price, enabled, triggered, last_trigger_direction, last_trigger_time, created_at, updated_at FROM alerts ORDER BY price ASC"
   ).all();
+  const status = await env.DB.prepare(
+    "SELECT usage_request, usage_reported FROM system_status WHERE id = 1"
+  ).first();
 
-  return json({ alerts: results || [], max: MAX_ALERTS });
+  return json({
+    alerts: results || [],
+    max: MAX_ALERTS,
+    usage_request: status?.usage_request || 0,
+    usage_reported: status?.usage_reported || 0,
+  });
 }
 
 async function saveAlerts(request, env) {
@@ -421,7 +522,10 @@ async function eaHeartbeat(request, env) {
 }
 
 async function getConfig(env) {
-  const status = await env.DB.prepare("SELECT symbol, config_version FROM system_status WHERE id = 1").first();
+  await ensureUsageColumns(env);
+  const status = await env.DB.prepare(
+    "SELECT symbol, config_version, usage_request FROM system_status WHERE id = 1"
+  ).first();
   const settings = await env.DB.prepare("SELECT alerts_enabled FROM settings WHERE id = 1").first();
   const alertsEnabled = settings?.alerts_enabled !== 0;
 
@@ -442,6 +546,7 @@ async function getConfig(env) {
       enabled: !!a.enabled,
     })),
     version: status?.config_version ?? 1,
+    usage_request: status?.usage_request || 0,
   });
 }
 

@@ -20,7 +20,9 @@ CREATE TABLE IF NOT EXISTS system_status (
   ea_online INTEGER NOT NULL DEFAULT 0,
   last_seen TEXT,
   updated_at TEXT,
-  config_version INTEGER NOT NULL DEFAULT 1
+  config_version INTEGER NOT NULL DEFAULT 1,
+  usage_request INTEGER NOT NULL DEFAULT 0,
+  usage_reported INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS settings (
