@@ -1,22 +1,19 @@
 //+------------------------------------------------------------------+
 //|                                              GoldPriceAlert.mq5  |
 //|                     XAUUSD Gold Price Alert System for MT5       |
-//|  Syncs alerts from Cloudflare Worker, detects price crosses,     |
-//|  and notifies server (Telegram sent by Worker).                  |
+//|  Pushes price to Cloudflare every 15s, pulls saved alerts,       |
+//|  and sends Telegram directly when a price is crossed.            |
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.10"
-#property description "XAUUSD gold price alert EA. OneDrive files only. Does not call Cloudflare."
+#property version   "1.11"
+#property description "XAUUSD gold price alert EA. Price and alerts via Cloudflare every 15s. Telegram sent by the EA."
 
 //--- inputs
-input string InpApiBaseUrl      = "";                                 // Cloudflare URL, empty = do not use website
+input string InpApiBaseUrl      = "https://alertdata.pages.dev";      // Cloudflare site, no trailing slash
 input string InpApiToken        = "";                                 // API Token (same as Worker secret API_TOKEN)
 input string InpSymbol          = "";                                 // Empty = chart symbol
-input int    InpSyncSeconds     = 2;                                  // Read alerts file interval (seconds)
-input int    InpStatusWriteSeconds = 15;                              // Write status.json for the phone (seconds)
-input bool   InpUseLocalFile    = true;                               // Read alerts from OneDrive/Common Files
-input string InpLocalFileName   = "gold-alert\\alerts.txt";           // Relative to Common\\Files
+input int    InpSyncSeconds     = 15;                                 // Push price and pull alerts (seconds, minimum 15)
 input bool   InpEnableTelegram  = false;                              // true = send Telegram when a price is crossed
 input string InpTelegramBotToken = "";                                // Bot token from BotFather
 input string InpTelegramChatId   = "";                                // Your Telegram chat id
@@ -48,31 +45,31 @@ bool       g_apiOk          = false;
 bool       g_loggedApiOk    = false;
 datetime   g_lastSyncTime   = 0;
 datetime   g_lastErrorLog   = 0;
-string     g_localFileSig   = "";
 bool       g_filePaused     = false;
-datetime   g_lastStatusWrite = 0;
-double     g_lastStatusMid   = 0.0;
-bool       g_loggedStatusOk  = false;
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(LOG_PREFIX, "EA initialized v1.10");
-   Print(LOG_PREFIX, "Cloudflare: off");
+   Print(LOG_PREFIX, "EA initialized v1.11");
    if(InpEnableTelegram && StringLen(InpTelegramBotToken) > 0 && StringLen(InpTelegramChatId) > 0)
-      Print(LOG_PREFIX, "Telegram: on");
+      Print(LOG_PREFIX, "Telegram: on (direct, not via Cloudflare)");
    else
       Print(LOG_PREFIX, "Telegram: off");
+
+   if(!HasCloudApi())
+   {
+      Print(LOG_PREFIX, "ERROR: Set InpApiBaseUrl and InpApiToken");
+      return(INIT_PARAMETERS_INCORRECT);
+   }
 
    g_symbol = InpSymbol;
    if(StringLen(g_symbol) == 0)
       g_symbol = _Symbol;
 
    Print(LOG_PREFIX, "Symbol: ", g_symbol);
-   Print(LOG_PREFIX, "Local file: Common\\Files\\", InpLocalFileName);
-   Print(LOG_PREFIX, "Sync interval: ", InpSyncSeconds, "s");
+   Print(LOG_PREFIX, "API: ", NormalizeBaseUrl());
 
    if(!SymbolSelect(g_symbol, true))
       Print(LOG_PREFIX, "WARNING: SymbolSelect failed for ", g_symbol);
@@ -80,7 +77,8 @@ int OnInit()
    ResetAlerts();
 
    int syncSec = InpSyncSeconds;
-   if(syncSec < 1) syncSec = 1;
+   if(syncSec < 15) syncSec = 15;
+   Print(LOG_PREFIX, "Sync interval: ", syncSec, "s");
    if(!EventSetTimer(syncSec))
    {
       Print(LOG_PREFIX, "ERROR: EventSetTimer failed");
@@ -275,60 +273,14 @@ void SyncWithServer()
    if(InpVerboseLog)
       Print(LOG_PREFIX, "Price: ", FormatPrice(mid), "  bid=", FormatPrice(bid), "  ask=", FormatPrice(ask));
 
-   FolderCreate("gold-alert", FILE_COMMON);
-   LoadPausedFlag();
-   LoadLocalAlerts(mid);
-   MaybeWriteStatus(bid, ask, mid);
+   bool wasOk = g_loggedApiOk;
+   if(!PostHeartbeat(bid, ask, mid))
+      return;
+   if(!wasOk)
+      Print(LOG_PREFIX, "API connected");
+   FetchConfig(mid);
 
    g_lastSyncTime = TimeCurrent();
-}
-
-void LoadPausedFlag()
-{
-   if(!FileIsExist("gold-alert\\paused.txt", FILE_COMMON))
-   {
-      g_filePaused = false;
-      return;
-   }
-   int fh = FileOpen("gold-alert\\paused.txt", FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_COMMON);
-   if(fh == INVALID_HANDLE)
-      return;
-   string line = TrimLine(FileReadString(fh));
-   FileClose(fh);
-   g_filePaused = (line == "1" || line == "true" || line == "TRUE");
-}
-
-void MaybeWriteStatus(const double bid, const double ask, const double mid)
-{
-   datetime now = TimeGMT();
-   int every = InpStatusWriteSeconds;
-   if(every < 5) every = 5;
-   if(g_lastStatusWrite != 0 && (now - g_lastStatusWrite) < every && MathAbs(mid - g_lastStatusMid) < 0.05)
-      return;
-
-   int fh = FileOpen("gold-alert\\status.json", FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_COMMON);
-   if(fh == INVALID_HANDLE)
-   {
-      LogErrorThrottled("ERROR: Cannot write status.json. Error=" + IntegerToString(GetLastError()) +
-                        " | Link Common\\Files\\gold-alert to OneDrive\\gold-alert");
-      return;
-   }
-   string json = "{";
-   json += "\"symbol\":\"" + g_symbol + "\",";
-   json += "\"price\":" + DoubleToString(mid, 5) + ",";
-   json += "\"bid\":" + DoubleToString(bid, 5) + ",";
-   json += "\"ask\":" + DoubleToString(ask, 5) + ",";
-   json += "\"ts\":" + IntegerToString((int)now);
-   json += "}";
-   FileWriteString(fh, json);
-   FileClose(fh);
-   g_lastStatusWrite = now;
-   g_lastStatusMid = mid;
-   if(!g_loggedStatusOk)
-   {
-      Print(LOG_PREFIX, "Wrote Common\\Files\\gold-alert\\status.json");
-      g_loggedStatusOk = true;
-   }
 }
 
 bool HasCloudApi()
@@ -387,117 +339,6 @@ void SendTelegram(const string text)
       return;
    }
    Print(LOG_PREFIX, "Telegram sent");
-}
-
-string TrimLine(string s)
-{
-   StringReplace(s, "\r", "");
-   StringTrimLeft(s);
-   StringTrimRight(s);
-   return s;
-}
-
-bool LoadLocalAlerts(const double currentPrice)
-{
-   if(!FileIsExist(InpLocalFileName, FILE_COMMON))
-      return false;
-
-   int fh = FileOpen(InpLocalFileName, FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_COMMON);
-   if(fh == INVALID_HANDLE)
-   {
-      LogErrorThrottled("ERROR: Cannot open local alerts file (set OneDrive folder Always keep on this device)");
-      return false;
-   }
-
-   string raw = "";
-   while(!FileIsEnding(fh))
-      raw += FileReadString(fh) + "\n";
-   FileClose(fh);
-
-   if(raw == g_localFileSig)
-      return (g_alertCount > 0);
-
-   AlertState newAlerts[MAX_ALERTS];
-   int newCount = 0;
-   for(int i = 0; i < MAX_ALERTS; i++)
-   {
-      newAlerts[i].id = 0;
-      newAlerts[i].price = 0.0;
-      newAlerts[i].enabled = false;
-      newAlerts[i].side = 0;
-      newAlerts[i].valid = false;
-   }
-
-   int start = 0;
-   int nlen = StringLen(raw);
-   while(start < nlen && newCount < MAX_ALERTS)
-   {
-      int nl = StringFind(raw, "\n", start);
-      if(nl < 0) nl = nlen;
-      string line = TrimLine(StringSubstr(raw, start, nl - start));
-      start = nl + 1;
-      if(StringLen(line) == 0) continue;
-      if(StringGetCharacter(line, 0) == '#') continue;
-      if(StringFind(line, "=") >= 0) continue;
-
-      bool enabled = true;
-      if(StringGetCharacter(line, 0) == '!')
-      {
-         enabled = false;
-         line = TrimLine(StringSubstr(line, 1));
-      }
-      int comma = StringFind(line, ",");
-      if(comma > 0)
-      {
-         string flag = TrimLine(StringSubstr(line, comma + 1));
-         line = TrimLine(StringSubstr(line, 0, comma));
-         if(flag == "0" || flag == "off" || flag == "false")
-            enabled = false;
-      }
-      double price = StringToDouble(line);
-      if(price <= 0.0) continue;
-
-      newAlerts[newCount].id = newCount + 1;
-      newAlerts[newCount].price = price;
-      newAlerts[newCount].enabled = enabled;
-      newAlerts[newCount].valid = true;
-      newAlerts[newCount].side = 0;
-      for(int k = 0; k < g_alertCount; k++)
-      {
-         if(g_alerts[k].valid && MathAbs(g_alerts[k].price - price) < 1e-8)
-         {
-            newAlerts[newCount].side = g_alerts[k].side;
-            break;
-         }
-      }
-      newCount++;
-   }
-
-   if(newCount == 0)
-   {
-      LogErrorThrottled("ERROR: Local alerts file has no prices");
-      return false;
-   }
-
-   for(int i = 0; i < MAX_ALERTS; i++)
-      g_alerts[i] = newAlerts[i];
-   g_alertCount = newCount;
-   g_localFileSig = raw;
-   g_configVersion++;
-
-   for(int i = 0; i < g_alertCount; i++)
-   {
-      if(g_alerts[i].side == 0 && currentPrice > 0.0)
-      {
-         if(currentPrice < g_alerts[i].price)
-            g_alerts[i].side = -1;
-         else if(currentPrice > g_alerts[i].price)
-            g_alerts[i].side = 1;
-      }
-   }
-
-   Print(LOG_PREFIX, "Loaded ", g_alertCount, " alerts from local file");
-   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -642,6 +483,7 @@ bool FetchConfig(const double currentPrice)
    }
 
    bool alertsEnabled = JsonGetBool(resp, "alerts_enabled", true);
+   g_filePaused = !alertsEnabled;
    if(!alertsEnabled)
    {
       ResetAlerts();

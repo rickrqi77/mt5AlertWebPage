@@ -7,7 +7,7 @@
  *   TELEGRAM_CHAT_ID    - Telegram chat/user id
  */
 
-const EA_OFFLINE_SECONDS = 15;
+const EA_OFFLINE_SECONDS = 45;
 const MAX_ALERTS = 15;
 const AUTO_GRID_SIDE = 7;
 
