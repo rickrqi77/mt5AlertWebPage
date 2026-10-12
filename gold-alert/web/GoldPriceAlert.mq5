@@ -6,17 +6,18 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.07"
-#property description "XAUUSD gold price alert EA. OneDrive file and/or Cloudflare API."
+#property version   "1.08"
+#property description "XAUUSD gold price alert EA. Reads/writes OneDrive local files, no Cloudflare."
 
 //--- inputs
 input string InpApiBaseUrl      = "";                                 // Cloudflare URL, empty = do not use website
 input string InpApiToken        = "";                                 // API Token (same as Worker secret API_TOKEN)
 input string InpSymbol          = "";                                 // Empty = chart symbol
-input int    InpSyncSeconds     = 2;                                  // Sync interval (seconds)
+input int    InpSyncSeconds     = 2;                                  // Read alerts file interval (seconds)
+input int    InpStatusWriteSeconds = 15;                              // Write status.json for the phone (seconds)
 input bool   InpUseLocalFile    = true;                               // Read alerts from OneDrive/Common Files
 input string InpLocalFileName   = "gold-alert\\alerts.txt";           // Relative to Common\\Files
-input bool   InpEnableTelegram  = true;                               // Notify Cloudflare on trigger (if API set)
+input bool   InpEnableTelegram  = false;                              // Telegram via Cloudflare (leave off)
 input bool   InpMt5Popup        = false;                              // true = MT5 popup on the PC (usually leave off)
 input bool   InpVerboseLog      = false;                              // true = log every heartbeat/price (fills Experts log)
 
@@ -46,6 +47,9 @@ bool       g_loggedApiOk    = false;
 datetime   g_lastSyncTime   = 0;
 datetime   g_lastErrorLog   = 0;
 string     g_localFileSig   = "";
+bool       g_filePaused     = false;
+datetime   g_lastStatusWrite = 0;
+double     g_lastStatusMid   = 0.0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
@@ -208,6 +212,8 @@ void InitAlertSides(const double price)
 //+------------------------------------------------------------------+
 void CheckCrosses(const double prevPrice, const double currPrice)
 {
+   if(g_filePaused)
+      return;
    for(int i = 0; i < g_alertCount; i++)
    {
       if(!g_alerts[i].valid || !g_alerts[i].enabled)
@@ -272,22 +278,63 @@ void SyncWithServer()
    if(InpVerboseLog)
       Print(LOG_PREFIX, "Price: ", FormatPrice(mid), "  bid=", FormatPrice(bid), "  ask=", FormatPrice(ask));
 
-   bool loadedFile = false;
    if(InpUseLocalFile)
-      loadedFile = LoadLocalAlerts(mid);
-
-   if(HasCloudApi())
+   {
+      FolderCreate("gold-alert", FILE_COMMON);
+      LoadPausedFlag();
+      LoadLocalAlerts(mid);
+      MaybeWriteStatus(bid, ask, mid);
+   }
+   else if(HasCloudApi())
    {
       if(!PostHeartbeat(bid, ask, mid))
-      {
-         if(!loadedFile)
-            return;
-      }
-      else if(!loadedFile)
-         FetchConfig(mid);
+         return;
+      FetchConfig(mid);
    }
 
    g_lastSyncTime = TimeCurrent();
+}
+
+void LoadPausedFlag()
+{
+   if(!FileIsExist("gold-alert\\paused.txt", FILE_COMMON))
+   {
+      g_filePaused = false;
+      return;
+   }
+   int fh = FileOpen("gold-alert\\paused.txt", FILE_READ|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_COMMON);
+   if(fh == INVALID_HANDLE)
+      return;
+   string line = TrimLine(FileReadString(fh));
+   FileClose(fh);
+   g_filePaused = (line == "1" || line == "true" || line == "TRUE");
+}
+
+void MaybeWriteStatus(const double bid, const double ask, const double mid)
+{
+   datetime now = TimeGMT();
+   int every = InpStatusWriteSeconds;
+   if(every < 5) every = 5;
+   if(g_lastStatusWrite != 0 && (now - g_lastStatusWrite) < every && MathAbs(mid - g_lastStatusMid) < 0.05)
+      return;
+
+   int fh = FileOpen("gold-alert\\status.json", FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_SHARE_READ|FILE_COMMON);
+   if(fh == INVALID_HANDLE)
+   {
+      LogErrorThrottled("ERROR: Cannot write status.json");
+      return;
+   }
+   string json = "{";
+   json += "\"symbol\":\"" + g_symbol + "\",";
+   json += "\"price\":" + DoubleToString(mid, 5) + ",";
+   json += "\"bid\":" + DoubleToString(bid, 5) + ",";
+   json += "\"ask\":" + DoubleToString(ask, 5) + ",";
+   json += "\"ts\":" + IntegerToString((int)now);
+   json += "}";
+   FileWriteString(fh, json);
+   FileClose(fh);
+   g_lastStatusWrite = now;
+   g_lastStatusMid = mid;
 }
 
 bool HasCloudApi()

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>快捷指令 + OneDrive 改提醒</title>
+  <title>OneDrive 设定提醒</title>
   <style>
     body { font-family: -apple-system, sans-serif; max-width: 640px; margin: 0 auto; padding: 20px 16px 48px; line-height: 1.55; color: #111; }
     h1 { font-size: 22px; }
@@ -13,74 +13,41 @@
     code, pre { background: #f3f3f3; border-radius: 8px; }
     code { padding: 1px 6px; }
     pre { padding: 12px; overflow-x: auto; white-space: pre-wrap; }
-    .note { color: #555; font-size: 14px; }
+    a { color: #8a5a00; }
   </style>
 </head>
 <body>
-  <h1>用快捷指令把提醒推到 EA</h1>
-  <p>iPhone 输入现价和间隔 → 生成 15 个价格 → 存进 OneDrive → 电脑同步 → MT5 EA 自动读取。</p>
+  <h1>网站 → OneDrive → EA</h1>
+  <p>平时网页<strong>不刷新</strong>。只有点「设定」才从 OneDrive 读取 EA 写下的现价，生成 15 档提醒并写回 OneDrive。EA <strong>不访问 Cloudflare</strong>。</p>
 
-  <h2>一、电脑（做一次）</h2>
+  <h2>你需要提供的（做一次）</h2>
+  <p>一个免费的 Microsoft 应用 ID。步骤：</p>
   <ol>
-    <li>安装并登录 <strong>OneDrive</strong>，和手机同一账号。</li>
-    <li>建立文件夹 <code>OneDrive\gold-alert</code>。</li>
-    <li>右键该文件夹 → <strong>始终保留在此设备上</strong>。</li>
-    <li>以管理员或当前用户运行仓库里的 <code>scripts/link-onedrive-alerts.bat</code>，把这个文件夹连接到 MT5 的 <code>Common\Files\gold-alert</code>。</li>
-    <li>下载并编译 <a href="/GoldPriceAlert.mq5">GoldPriceAlert.mq5</a>（v1.06）。</li>
-    <li>挂 EA 时勾选 <code>InpUseLocalFile = true</code>。可以不填 Cloudflare。</li>
+    <li>打开 <a href="https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade">Azure 应用注册</a>（用你的微软账号登录）。</li>
+    <li>点「新注册」。</li>
+    <li>名称填 <code>GOLD ALERT</code>。</li>
+    <li>受支持的帐户类型选：<strong>任何组织目录中的帐户和个人 Microsoft 帐户</strong>。</li>
+    <li>重定向 URI 平台选 <strong>单页应用 (SPA)</strong>，URI 填：<br /><code>https://alertdata.pages.dev/</code></li>
+    <li>注册后复制 <strong>应用程序(客户端) ID</strong>，粘贴到网页登录框。</li>
+    <li>「API 权限」确认有 <code>User.Read</code> 和 <code>Files.ReadWrite</code>（委派）。没有就添加 Microsoft Graph 委派权限，并代表自己同意。</li>
+    <li>不要创建客户端密码。网页只用公开的 Client ID，密码不要放进网站。</li>
+  </ol>
+  <p>把 Client ID 发给我也可以，我可以帮你写进页面默认值。</p>
+
+  <h2>电脑（做一次）</h2>
+  <ol>
+    <li>OneDrive 与手机同一账号，文件夹 <code>OneDrive\gold-alert</code> 设为<strong>始终保留在此设备上</strong>。</li>
+    <li>运行 <code>scripts/link-onedrive-alerts.bat</code>。</li>
+    <li>下载 <a href="/GoldPriceAlert.mq5">GoldPriceAlert.mq5</a>（v1.08），编译后挂上。</li>
+    <li>参数：<code>InpUseLocalFile = true</code>，Cloudflare 地址留空。</li>
   </ol>
 
-  <h2>二、iPhone 快捷指令（做一次）</h2>
-  <p class="note">快捷指令 App → 右上角 + → 按下面添加动作。现价由你输入（建议看 MT5 或网页上的整数价）。</p>
+  <h2>手机怎么用</h2>
   <ol>
-    <li><strong>提问</strong>：提示「当前金价」，输入种类「数字」，存到变量 <code>现价</code>。</li>
-    <li><strong>从列表中选择</strong>：1 / 2 / 3 / 4 / 5 / 10，提示「间隔」，存到变量 <code>间隔</code>。</li>
-    <li><strong>四舍五入</strong>：对「现价」取整，模式选「始终向下」，存到变量 <code>基数</code>。（例如 4195.8 → 4195）</li>
-    <li><strong>文本</strong>：先放一行 <code># gold-alert</code>，存到变量 <code>内容</code>。</li>
-    <li><strong>重复</strong> 7 次：
-      <ul>
-        <li>计算：<code>8 - 重复索引</code>，再计算 <code>基数 - 该数 × 间隔</code></li>
-        <li>文本：上一行内容 + 换行 + 这个价格</li>
-        <li>把结果存回 <code>内容</code></li>
-      </ul>
-    </li>
-    <li>文本：<code>内容</code> + 换行 + <code>!</code> + <code>基数</code>（中间价默认不触发）</li>
-    <li>再 <strong>重复</strong> 7 次：
-      <ul>
-        <li>计算：<code>基数 + 重复索引 × 间隔</code></li>
-        <li>追加到 <code>内容</code></li>
-      </ul>
-    </li>
-    <li><strong>存储文件</strong>：
-      <ul>
-        <li>文件名 <code>alerts.txt</code></li>
-        <li>目的地选 <strong>OneDrive / gold-alert</strong></li>
-        <li>打开「覆盖已有文件」</li>
-      </ul>
-    </li>
-    <li>可选：通知「已写入 15 个提醒」。</li>
+    <li>打开 <a href="/">alertdata.pages.dev</a>，填 Client ID，登录 Microsoft。</li>
+    <li>选间隔，点「设定」：这时才取现价、生成提醒、写入 OneDrive。</li>
+    <li>可改触发/关闭后点「保存设置」，也会写入 OneDrive。</li>
+    <li>EA 读取电脑上已同步的 <code>alerts.txt</code>，不经过 Cloudflare。</li>
   </ol>
-
-  <h2>三、文件格式</h2>
-  <pre># gold-alert
-4160
-4165
-4170
-4175
-4180
-4185
-4190
-!4195
-4200
-4205
-4210
-4215
-4220
-4225
-4230</pre>
-  <p>一行一个价格。<code>!</code> 开头表示关闭（不触发）。最多 15 个。EA 发现文件变化后会立刻换一组价格。</p>
-
-  <h2>四、通知</h2>
-  <p>默认<strong>不在电脑上弹窗</strong>。要手机收，用 Telegram 或 MT5 官方推送。若要电脑弹窗，把 EA 参数 <code>InpMt5Popup</code> 勾上。</p>
 </body>
 </html>
