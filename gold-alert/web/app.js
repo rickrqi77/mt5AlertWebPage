@@ -1,6 +1,6 @@
 /**
  * GOLD ALERT - Mobile web client
- * API Token is entered by user and stored in sessionStorage (never hardcoded).
+ * API Token is entered by user and stored in localStorage on this device.
  */
 
 (function () {
@@ -26,14 +26,20 @@
   // -------------------------------------------------------------------------
 
   function getToken() {
-    return sessionStorage.getItem(TOKEN_KEY) || "";
+    var token = localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY) || "";
+    if (token && !localStorage.getItem(TOKEN_KEY)) {
+      localStorage.setItem(TOKEN_KEY, token);
+    }
+    return token;
   }
 
   function setToken(token) {
-    sessionStorage.setItem(TOKEN_KEY, token);
+    localStorage.setItem(TOKEN_KEY, token);
+    sessionStorage.removeItem(TOKEN_KEY);
   }
 
   function clearToken() {
+    localStorage.removeItem(TOKEN_KEY);
     sessionStorage.removeItem(TOKEN_KEY);
   }
 
