@@ -1,6 +1,6 @@
 /**
  * GOLD ALERT - Mobile web client
- * Token is entered once per device; later visits unlock with a 9-dot pattern.
+ * Token is entered once per device and remembered; new devices must enter it first.
  */
 
 (function () {
@@ -10,7 +10,6 @@
   const REFRESH_MS = 1000;
   const TOKEN_KEY = "gold_alert_api_token";
   const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10;
-  const PATTERN_SECRET = "2589";
 
   /** @type {Array<{id?: number|null, price: string, enabled: boolean, triggered: boolean}>} */
   let localAlerts = [];
@@ -20,10 +19,6 @@
   let capturedStep = null;
   let alertsPaused = false;
   let alertsDirty = false;
-  let patternSeq = [];
-  let patternDrawing = false;
-  let patternCursor = { x: 0, y: 0 };
-  let patternResetTimer = null;
   let warmupPromise = null;
   let dataReady = false;
 
@@ -133,21 +128,8 @@
     stopRefresh();
     $("auth-screen").classList.remove("hidden");
     $("app-screen").classList.add("hidden");
-    $("token-panel").classList.remove("hidden");
-    $("pattern-panel").classList.add("hidden");
-    $("auth-hint").textContent = "本机输入一次 Token，之后滑动解锁";
+    $("auth-hint").textContent = "新设备输入一次 Token，本机以后不用再输入";
     hideAuthError();
-  }
-
-  function showPatternAuth() {
-    $("auth-screen").classList.remove("hidden");
-    $("app-screen").classList.add("hidden");
-    $("token-panel").classList.add("hidden");
-    $("pattern-panel").classList.remove("hidden");
-    $("auth-hint").textContent = "滑动解锁";
-    hideAuthError();
-    resetPattern(true);
-    startWarmupAndPoll();
   }
 
   function showAuth() {
@@ -162,175 +144,6 @@
 
   function enterApp() {
     showApp();
-  }
-
-  function patternDots() {
-    return Array.prototype.slice.call(document.querySelectorAll(".pattern-dot"));
-  }
-
-  function resetPattern(clearError) {
-    if (patternResetTimer) {
-      clearTimeout(patternResetTimer);
-      patternResetTimer = null;
-    }
-    patternSeq = [];
-    patternDrawing = false;
-    var lock = $("pattern-lock");
-    if (lock) {
-      lock.classList.remove("error", "shake");
-    }
-    patternDots().forEach(function (el) {
-      el.classList.remove("on");
-    });
-    var path = $("pattern-path");
-    if (path) {
-      path.setAttribute("d", "");
-      path.setAttribute("stroke", "#d4a017");
-    }
-    if (clearError) hideAuthError();
-  }
-
-  function skippedDot(from, to) {
-    var ax = (from - 1) % 3;
-    var ay = Math.floor((from - 1) / 3);
-    var bx = (to - 1) % 3;
-    var by = Math.floor((to - 1) / 3);
-    var dx = bx - ax;
-    var dy = by - ay;
-    if (dx === 0 && dy === 0) return 0;
-    if (Math.abs(dx) !== 0 && Math.abs(dy) !== 0 && Math.abs(dx) !== Math.abs(dy)) return 0;
-    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) return 0;
-    var stepX = dx === 0 ? 0 : dx / Math.abs(dx);
-    var stepY = dy === 0 ? 0 : dy / Math.abs(dy);
-    if (Math.abs(dx) === 2 && Math.abs(dy) === 2) {
-      return (ax + stepX) + (ay + stepY) * 3 + 1;
-    }
-    if (Math.abs(dx) === 2 && dy === 0) return ax + stepX + ay * 3 + 1;
-    if (Math.abs(dy) === 2 && dx === 0) return ax + (ay + stepY) * 3 + 1;
-    return 0;
-  }
-
-  function addPatternDot(n) {
-    n = String(n);
-    if (patternSeq.indexOf(n) >= 0) return;
-    if (patternSeq.length) {
-      var mid = skippedDot(Number(patternSeq[patternSeq.length - 1]), Number(n));
-      if (mid && patternSeq.indexOf(String(mid)) < 0) {
-        patternSeq.push(String(mid));
-        var midEl = document.querySelector('.pattern-dot[data-n="' + mid + '"]');
-        if (midEl) midEl.classList.add("on");
-      }
-    }
-    patternSeq.push(n);
-    var el = document.querySelector('.pattern-dot[data-n="' + n + '"]');
-    if (el) el.classList.add("on");
-    if (navigator.vibrate) {
-      try {
-        navigator.vibrate(12);
-      } catch {
-        /* ignore */
-      }
-    }
-    drawPatternLines();
-  }
-
-  function drawPatternLines() {
-    var lock = $("pattern-lock");
-    var path = $("pattern-path");
-    if (!lock || !path) return;
-    var wrap = lock.getBoundingClientRect();
-    var d = "";
-    patternSeq.forEach(function (n, i) {
-      var el = document.querySelector('.pattern-dot[data-n="' + n + '"]');
-      if (!el) return;
-      var r = el.getBoundingClientRect();
-      var x = r.left + r.width / 2 - wrap.left;
-      var y = r.top + r.height / 2 - wrap.top;
-      d += (i === 0 ? "M" : "L") + x + " " + y;
-    });
-    if (patternDrawing && patternSeq.length) {
-      d += "L" + patternCursor.x + " " + patternCursor.y;
-    }
-    path.setAttribute("d", d);
-  }
-
-  function hitPatternDot(clientX, clientY) {
-    var dots = patternDots();
-    var best = null;
-    var bestD = Infinity;
-    for (var i = 0; i < dots.length; i++) {
-      var r = dots[i].getBoundingClientRect();
-      var cx = r.left + r.width / 2;
-      var cy = r.top + r.height / 2;
-      var radius = Math.max(r.width, r.height) * 1.6;
-      var dx = cx - clientX;
-      var dy = cy - clientY;
-      var dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist <= radius && dist < bestD) {
-        best = dots[i];
-        bestD = dist;
-      }
-    }
-    return best;
-  }
-
-  function setPatternCursor(clientX, clientY) {
-    var wrap = $("pattern-lock").getBoundingClientRect();
-    patternCursor = { x: clientX - wrap.left, y: clientY - wrap.top };
-  }
-
-  function onPatternPointerDown(e) {
-    if ($("pattern-panel").classList.contains("hidden")) return;
-    e.preventDefault();
-    resetPattern(true);
-    $("auth-hint").textContent = "滑动解锁";
-    patternDrawing = true;
-    try {
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-    setPatternCursor(e.clientX, e.clientY);
-    var hit = hitPatternDot(e.clientX, e.clientY);
-    if (hit) addPatternDot(hit.getAttribute("data-n"));
-  }
-
-  function onPatternPointerMove(e) {
-    if (!patternDrawing) return;
-    e.preventDefault();
-    setPatternCursor(e.clientX, e.clientY);
-    var hit = hitPatternDot(e.clientX, e.clientY);
-    if (hit) addPatternDot(hit.getAttribute("data-n"));
-    else drawPatternLines();
-  }
-
-  function finishPattern() {
-    if (!patternDrawing && !patternSeq.length) return;
-    patternDrawing = false;
-    drawPatternLines();
-    var code = patternSeq.join("");
-    if (!code) return;
-    if (code === PATTERN_SECRET) {
-      $("auth-hint").textContent = "已解锁";
-      hideAuthError();
-      enterApp();
-      return;
-    }
-    var lock = $("pattern-lock");
-    lock.classList.add("error", "shake");
-    $("pattern-path").setAttribute("stroke", "#e74c3c");
-    $("auth-hint").textContent = "图案错误，再试一次";
-    showAuthError("图案错误");
-    patternResetTimer = setTimeout(function () {
-      resetPattern(true);
-      $("auth-hint").textContent = "滑动解锁";
-    }, 450);
-  }
-
-  function onPatternPointerUp(e) {
-    if (!patternDrawing) return;
-    e.preventDefault();
-    finishPattern();
   }
 
   async function unlock() {
@@ -628,12 +441,7 @@
 
   function onPageVisible() {
     if (!getToken()) return;
-    if (
-      $("app-screen").classList.contains("hidden") &&
-      $("pattern-panel").classList.contains("hidden")
-    ) {
-      return;
-    }
+    if ($("app-screen").classList.contains("hidden")) return;
     alertsDirty = false;
     warmupData();
   }
@@ -818,19 +626,6 @@
     $("token-input").addEventListener("keydown", (e) => {
       if (e.key === "Enter") unlock();
     });
-    var lock = $("pattern-lock");
-    lock.addEventListener("pointerdown", onPatternPointerDown);
-    lock.addEventListener("pointermove", onPatternPointerMove);
-    lock.addEventListener("pointerup", onPatternPointerUp);
-    lock.addEventListener("pointercancel", onPatternPointerUp);
-    lock.addEventListener("lostpointercapture", function () {
-      if (patternDrawing) finishPattern();
-    });
-    $("btn-reenter-token").addEventListener("click", function () {
-      clearToken();
-      $("token-input").value = "";
-      showTokenAuth();
-    });
     $("btn-logout").addEventListener("click", () => {
       clearToken();
       $("token-input").value = "";
@@ -855,7 +650,7 @@
       showTokenAuth();
       return;
     }
-    showPatternAuth();
+    enterApp();
   }
 
   init();

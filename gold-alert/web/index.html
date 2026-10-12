@@ -10,7 +10,7 @@
   <title>GOLD ALERT</title>
   <link rel="icon" href="/icon.jpg" type="image/jpeg" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/style.css?v=20" />
+  <link rel="stylesheet" href="/style.css?v=21" />
 </head>
 <body>
   <!-- Token unlock screen (API token never hardcoded) -->
@@ -20,7 +20,7 @@
         <img src="/icon.jpg" alt="" class="brand-icon brand-icon-lg" />
         <h1 class="brand">GOLD ALERT</h1>
       </div>
-      <p id="auth-hint" class="auth-hint">本机输入一次 Token，之后滑动解锁</p>
+      <p id="auth-hint" class="auth-hint">新设备输入一次 Token，本机以后不用再输入</p>
       <div id="token-panel">
         <input
           id="token-input"
@@ -32,25 +32,6 @@
           class="input"
         />
         <button id="btn-unlock" class="btn btn-primary btn-block" type="button">解锁</button>
-      </div>
-      <div id="pattern-panel" class="hidden">
-        <div id="pattern-lock" class="pattern-lock" role="application" aria-label="九宫格滑动解锁">
-          <svg class="pattern-svg" aria-hidden="true">
-            <path id="pattern-path" fill="none" stroke="#d4a017" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
-          </svg>
-          <div class="pattern-grid">
-            <span class="pattern-dot" data-n="1"></span>
-            <span class="pattern-dot" data-n="2"></span>
-            <span class="pattern-dot" data-n="3"></span>
-            <span class="pattern-dot" data-n="4"></span>
-            <span class="pattern-dot" data-n="5"></span>
-            <span class="pattern-dot" data-n="6"></span>
-            <span class="pattern-dot" data-n="7"></span>
-            <span class="pattern-dot" data-n="8"></span>
-            <span class="pattern-dot" data-n="9"></span>
-          </div>
-        </div>
-        <button id="btn-reenter-token" class="btn-ghost btn-block" type="button">重新输入 Token</button>
       </div>
       <p id="auth-error" class="error-msg hidden"></p>
     </div>
@@ -119,6 +100,6 @@
     </footer>
   </div>
 
-  <script src="/app.js?v=20"></script>
+  <script src="/app.js?v=21"></script>
 </body>
 </html>
