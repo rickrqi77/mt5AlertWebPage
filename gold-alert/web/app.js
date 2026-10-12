@@ -344,7 +344,10 @@
 
     setToken(token);
     await warmupData();
-    if (!getToken()) return;
+    if (!getToken()) {
+      showAuthError("Token 无效");
+      return;
+    }
     enterApp();
   }
 
