@@ -267,7 +267,7 @@ iPhone 快捷指令按现价和间隔生成 15 个提醒，存到 OneDrive，EA 
 - 手机打开：`https://alertdata.pages.dev/onedrive.html`
 - EA：`InpUseLocalFile = true`（可留空 Cloudflare 地址）
 - 电脑运行一次：`scripts/link-onedrive-alerts.bat`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.06）
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.07，默认电脑不弹窗）
 
 ---
 
