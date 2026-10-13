@@ -265,7 +265,7 @@ https://gold-alert.xxxxx.workers.dev
 EA 按间隔向 Cloudflare 发 **一次** 请求：带上最新价格、哪些提醒还在触发，并在同一次响应里取回已保存的提醒。网页没有「刷新」按钮。页面打开时，按这个间隔读取 EA 刚写入的价格和使用情况。设定和保存写入 Cloudflare。价格穿越后，EA 直接把消息发给 Telegram。
 
 - 手机网页：`https://alertdata.pages.dev/`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.16）
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.15）
 
 ---
 
@@ -349,34 +349,13 @@ https://api.telegram.org
 4. 勾选「允许算法交易」
 5. 确认 MT5 顶部「Algo Trading」按钮为 **绿色开启**
 
-### 11.4b 在电脑上改同步间隔
+### 11.4b 在电脑上改取提醒间隔
 
-EA 为 v1.16 并正在运行时，不用打开 MT5 参数。间隔文件大约 1 秒后生效。Cloudflare 请求仍按文件里的秒数发送，不会因为这一秒一次的本地检查而增加。
-
-手动改一次：
+EA 为 v1.15 并正在运行时，不用打开 MT5 参数。
 
 1. 下载并双击：`https://alertdata.pages.dev/set-alert-interval.bat`
 2. 输入秒数（3 到 3600），回车
-3. Experts 出现 `Pull interval updated: Ns`
-
-交给 Windows 任务计划程序，按钟点自动改：
-
-1. 把下面三个文件下载到同一个文件夹
-   - `https://alertdata.pages.dev/set-alert-interval.bat`
-   - `https://alertdata.pages.dev/alert-interval-schedule.ps1`
-   - `https://alertdata.pages.dev/install-alert-interval-tasks.bat`
-2. 双击 `install-alert-interval-tasks.bat`
-3. 「任务计划程序」里会出现 **GoldAlert Interval**。触发时间是工作日 08:00、工作日 18:00、每天 23:00，以及每次登录。电脑当时没开，下次登录会按当时的钟点补上
-
-| 本地时间 | 间隔 |
-|----------|------|
-| 周一至周五 08:00–18:00 | 3 秒 |
-| 周一至周五 18:00–23:00 | 10 秒 |
-| 每天 23:00–08:00，以及周六日 08:00–23:00 | 3600 秒 |
-
-自己建任务时，程序填 `set-alert-interval.bat`，参数填 `auto`，或直接填 `3`、`10`、`3600`。参数是数字时不再弹窗。
-
-要改钟点，编辑 `alert-interval-schedule.ps1` 开头的 `$DayStart`、`$EveningStart`、`$SleepStart`，再双击一次安装脚本。
+3. Experts 下次取提醒时出现 `Pull interval updated: Ns`
 
 文件写在 `%APPDATA%\MetaQuotes\Terminal\Common\Files\gold-alert-interval.txt`。删掉这个文件后，EA 回到图表参数 `InpSyncSeconds`。
 
@@ -385,7 +364,7 @@ EA 为 v1.16 并正在运行时，不用打开 MT5 参数。间隔文件大约 1
 打开 MT5 下方 **「专家」(Experts)** 标签，应看到类似：
 
 ```
-[GoldAlert] EA initialized v1.16
+[GoldAlert] EA initialized v1.15
 [GoldAlert] Sync every 3s: price, usage, and alerts in one request.
 [GoldAlert] Symbol: XAUUSD
 [GoldAlert] API connected
@@ -501,7 +480,7 @@ Telegram 消息示例：
 
 ### Q: 怎么确认 EA 在取提醒？
 
-网页不再显示在线或离线。看 MT5 Experts：应有 `EA initialized v1.16`、`Sync every 3s: price, usage, and alerts in one request.`、`API connected`。保存提醒后下次同步出现新的 `Loaded`。
+网页不再显示在线或离线。看 MT5 Experts：应有 `EA initialized v1.15`、`Sync every 3s: price, usage, and alerts in one request.`、`API connected`。保存提醒后下次同步出现新的 `Loaded`。
 
 ### Q: 收不到 Telegram
 
