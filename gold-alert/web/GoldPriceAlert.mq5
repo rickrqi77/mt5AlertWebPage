@@ -7,7 +7,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.15"
+#property version   "1.16"
 #property description "XAUUSD gold price alert EA. One request sends price and alert usage, and receives saved alerts. Telegram sent by the EA."
 
 //--- inputs
@@ -45,6 +45,7 @@ bool       g_hasPrevPrice   = false;
 bool       g_apiOk          = false;
 bool       g_loggedApiOk    = false;
 datetime   g_lastSyncTime   = 0;
+datetime   g_lastSyncLocal  = 0;
 datetime   g_lastErrorLog   = 0;
 bool       g_filePaused     = false;
 int        g_syncSeconds    = 0;
@@ -57,7 +58,7 @@ bool ApplySyncInterval(const bool startup);
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(LOG_PREFIX, "EA initialized v1.15");
+   Print(LOG_PREFIX, "EA initialized v1.16");
    if(InpEnableTelegram && StringLen(InpTelegramBotToken) > 0 && StringLen(InpTelegramChatId) > 0)
       Print(LOG_PREFIX, "Telegram: on (direct, not via Cloudflare)");
    else
@@ -100,11 +101,16 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Timer: one POST /api/ea/sync (price, usage, and saved alerts)    |
+//| Timer: read the interval file every second. The Cloudflare POST  |
+//| still happens once per saved interval, so a smaller interval    |
+//| starts within about a second instead of waiting out the old one.|
 //+------------------------------------------------------------------+
 void OnTimer()
 {
    ApplySyncInterval(false);
+   int elapsed = (int)(TimeLocal() - g_lastSyncLocal);
+   if(g_lastSyncLocal != 0 && elapsed >= 0 && elapsed < g_syncSeconds)
+      return;
    SyncWithServer();
 }
 
@@ -153,7 +159,8 @@ bool ApplySyncInterval(const bool startup)
    int sec = ResolveSyncSeconds();
    if(!startup && sec == g_syncSeconds)
       return true;
-   if(!EventSetTimer(sec))
+   // Local one-second timer. HTTP still waits for sec.
+   if(!EventSetTimer(1))
    {
       Print(LOG_PREFIX, "ERROR: EventSetTimer failed");
       return false;
@@ -335,6 +342,7 @@ void SyncWithServer()
 
    SyncOnce(bid, ask, mid);
    g_lastSyncTime = TimeCurrent();
+   g_lastSyncLocal = TimeLocal();
 }
 
 bool HasCloudApi()
