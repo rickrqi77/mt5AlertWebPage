@@ -301,17 +301,18 @@ EA 按间隔向 Cloudflare 发 **一次** 请求：带上最新价格、哪些�
 3. 进入：`MQL5 / Experts`
 4. 把本项目的 `mt5/GoldPriceAlert.mq5` 复制进去
 
-### 11.2 用 MetaEditor 编译
+### 11.2 编译
 
-1. 在 MT5 中按 **F4** 打开 MetaEditor  
-   （或：工具 → MetaQuotes Language Editor）
-2. 在左侧导航找到 `Experts / GoldPriceAlert.mq5`
-3. 打开后按 **F7**（Compile）编译
-4. 下方应显示 `0 error(s)`
-5. 回到 MT5，在「导航」→「Expert Advisors」中应出现 **GoldPriceAlert**
+网站上的 `.mq5` 不能直接被 MT5 运行。编译器在你这台 Windows 的 MT5 里。双击下面的脚本会下载最新源码，调用本机 MetaEditor 编译，并覆盖 `GoldPriceAlert.ex5`。不用打开 MetaEditor 按 F7。
 
-> Cursor / 本开发环境 **无法直接编译 MQL5**。  
-> 必须在 Windows 上的 **MetaEditor** 中编译。
+1. 把这两个文件下载到同一个文件夹
+   - `https://alertdata.pages.dev/compile-gold-alert.bat`
+   - `https://alertdata.pages.dev/compile-gold-alert.ps1`
+2. 先打开过一次 MetaTrader 5
+3. 双击 `compile-gold-alert.bat`
+4. 看到「已覆盖」后，图表上的 EA 通常会自动重新加载。Experts 里应出现新的 `EA initialized` 版本
+
+仍想手工编译时：在 MT5 按 **F4** 打开 MetaEditor，打开 `Experts / GoldPriceAlert.mq5`，按 **F7**。下方应显示 `0 error(s)`。
 
 ### 11.3 允许 WebRequest（必须做，否则 EA 无法联网）
 
