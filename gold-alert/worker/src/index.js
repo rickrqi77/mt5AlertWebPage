@@ -7,9 +7,55 @@
  *   TELEGRAM_CHAT_ID    - Telegram chat/user id
  */
 
-const EA_OFFLINE_SECONDS = 15;
+const EA_OFFLINE_SECONDS = 45;
 const MAX_ALERTS = 15;
 const AUTO_GRID_SIDE = 7;
+const SWISSQUOTE_XAU_URL =
+  "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAU/USD";
+
+let usageColumnsReady = false;
+let syncSecondsReady = false;
+
+async function ensureSyncSecondsColumn(env) {
+  if (syncSecondsReady) return;
+  try {
+    await env.DB.prepare("SELECT sync_seconds FROM system_status WHERE id = 1").first();
+  } catch {
+    try {
+      await env.DB.prepare(
+        "ALTER TABLE system_status ADD COLUMN sync_seconds INTEGER NOT NULL DEFAULT 3"
+      ).run();
+    } catch {
+      /* column already exists */
+    }
+  }
+  syncSecondsReady = true;
+}
+
+async function ensureUsageColumns(env) {
+  if (usageColumnsReady) return;
+  try {
+    await env.DB.prepare(
+      "SELECT usage_request, usage_reported FROM system_status WHERE id = 1"
+    ).first();
+  } catch {
+    try {
+      await env.DB.prepare(
+        "ALTER TABLE system_status ADD COLUMN usage_request INTEGER NOT NULL DEFAULT 0"
+      ).run();
+    } catch {
+      /* column already exists */
+    }
+    try {
+      await env.DB.prepare(
+        "ALTER TABLE system_status ADD COLUMN usage_reported INTEGER NOT NULL DEFAULT 0"
+      ).run();
+    } catch {
+      /* column already exists */
+    }
+  }
+  usageColumnsReady = true;
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -55,6 +101,12 @@ async function handleApi(request, env, url) {
   if (method === "GET" && path === "/api/status") {
     return await getStatus(env);
   }
+  if (method === "GET" && path === "/api/spot") {
+    return await getSpot(env);
+  }
+  if (method === "POST" && path === "/api/ea/usage") {
+    return await reportAlertUsage(request, env);
+  }
   if (method === "GET" && path === "/api/alerts") {
     return await getAlerts(env);
   }
@@ -70,6 +122,9 @@ async function handleApi(request, env, url) {
   }
   if (method === "POST" && path === "/api/ea/heartbeat") {
     return await eaHeartbeat(request, env);
+  }
+  if (method === "POST" && path === "/api/ea/sync") {
+    return await eaSync(request, env);
   }
   if (method === "GET" && path === "/api/config") {
     return await getConfig(env);
@@ -130,11 +185,15 @@ function checkAuth(request, env) {
 // ---------------------------------------------------------------------------
 
 async function getStatus(env) {
+  await ensureSyncSecondsColumn(env);
   const status = await env.DB.prepare("SELECT * FROM system_status WHERE id = 1").first();
   const settings = await env.DB.prepare(
     "SELECT step, telegram_enabled, alerts_enabled FROM settings WHERE id = 1"
   ).first();
   const countRow = await env.DB.prepare("SELECT COUNT(*) AS c FROM alerts").first();
+  const { results } = await env.DB.prepare(
+    "SELECT id, price, enabled, triggered, last_trigger_direction, last_trigger_time, created_at, updated_at FROM alerts ORDER BY price ASC"
+  ).all();
 
   const lastSeen = status?.last_seen || null;
   const eaOnline = isEaOnline(lastSeen);
@@ -147,20 +206,142 @@ async function getStatus(env) {
     ea_online: eaOnline,
     last_seen: lastSeen,
     alerts_count: countRow?.c ?? 0,
+    alerts: results || [],
     step: settings?.step ?? 5,
     telegram_enabled: !!(settings?.telegram_enabled),
     alerts_enabled: settings?.alerts_enabled === 0 ? false : true,
     paused: settings?.alerts_enabled === 0,
     config_version: status?.config_version ?? 1,
+    sync_seconds: status?.sync_seconds || 3,
   });
 }
 
+function pickSwissquoteQuote(payload) {
+  const rows = Array.isArray(payload) ? payload : [];
+  let fallback = null;
+  for (const row of rows) {
+    const profiles = Array.isArray(row.spreadProfilePrices) ? row.spreadProfilePrices : [];
+    for (const profile of profiles) {
+      const bid = Number(profile.bid);
+      const ask = Number(profile.ask);
+      if (!Number.isFinite(bid) || !Number.isFinite(ask) || bid <= 0 || ask <= 0 || ask < bid) continue;
+      const quote = {
+        bid: roundPrice(bid),
+        ask: roundPrice(ask),
+        price: roundPrice((bid + ask) / 2),
+      };
+      if (!fallback) fallback = quote;
+      if (profile.spreadProfile === "prime") return quote;
+    }
+  }
+  return fallback;
+}
+
+async function getSpot(env) {
+  let payload;
+  try {
+    const res = await fetch(SWISSQUOTE_XAU_URL, {
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      return json({ error: "现货价格暂时取不到" }, 502);
+    }
+    payload = await res.json();
+  } catch {
+    return json({ error: "现货价格暂时取不到" }, 502);
+  }
+
+  const quote = pickSwissquoteQuote(payload);
+  if (!quote) {
+    return json({ error: "现货价格暂时取不到" }, 502);
+  }
+
+  const usageRequest = await requestUsageReport(env);
+  return json({
+    symbol: "XAUUSD",
+    price: quote.price,
+    bid: quote.bid,
+    ask: quote.ask,
+    source: "swissquote",
+    usage_request: usageRequest,
+  });
+}
+
+async function requestUsageReport(env) {
+  await ensureUsageColumns(env);
+  await env.DB.prepare(
+    "UPDATE system_status SET usage_request = usage_request + 1 WHERE id = 1"
+  ).run();
+  const row = await env.DB.prepare(
+    "SELECT usage_request FROM system_status WHERE id = 1"
+  ).first();
+  return row?.usage_request || 0;
+}
+
+async function reportAlertUsage(request, env) {
+  await ensureUsageColumns(env);
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const requestId = Number(body.request_id);
+  const alerts = Array.isArray(body.alerts) ? body.alerts : null;
+  if (!Number.isInteger(requestId) || requestId <= 0 || !alerts) {
+    return json({ error: "request_id and alerts required" }, 400);
+  }
+
+  const status = await env.DB.prepare(
+    "SELECT usage_request, usage_reported FROM system_status WHERE id = 1"
+  ).first();
+  if (!status || requestId !== status.usage_request || requestId === status.usage_reported) {
+    return json({ ok: true, ignored: true });
+  }
+
+  const statements = [];
+  for (const item of alerts) {
+    const id = Number(item.id);
+    if (!Number.isInteger(id) || id <= 0) continue;
+    const enabled = item.enabled === true || item.enabled === 1;
+    const existing = await env.DB.prepare(
+      "SELECT enabled, triggered FROM alerts WHERE id = ?"
+    ).bind(id).first();
+    if (!existing) continue;
+    const wasEnabled = existing.enabled === 1 || existing.enabled === true;
+    const triggered = !enabled && wasEnabled ? 1 : enabled ? 0 : existing.triggered ? 1 : 0;
+    statements.push(
+      env.DB.prepare(
+        "UPDATE alerts SET enabled = ?, triggered = ?, updated_at = datetime('now') WHERE id = ?"
+      ).bind(enabled ? 1 : 0, triggered, id)
+    );
+  }
+  statements.push(
+    env.DB.prepare(
+      "UPDATE system_status SET usage_reported = ? WHERE id = 1"
+    ).bind(requestId)
+  );
+  if (statements.length > 0) await env.DB.batch(statements);
+
+  return json({ ok: true, usage_reported: requestId });
+}
+
 async function getAlerts(env) {
+  await ensureUsageColumns(env);
   const { results } = await env.DB.prepare(
     "SELECT id, price, enabled, triggered, last_trigger_direction, last_trigger_time, created_at, updated_at FROM alerts ORDER BY price ASC"
   ).all();
+  const status = await env.DB.prepare(
+    "SELECT usage_request, usage_reported FROM system_status WHERE id = 1"
+  ).first();
 
-  return json({ alerts: results || [], max: MAX_ALERTS });
+  return json({
+    alerts: results || [],
+    max: MAX_ALERTS,
+    usage_request: status?.usage_request || 0,
+    usage_reported: status?.usage_reported || 0,
+  });
 }
 
 async function saveAlerts(request, env) {
@@ -270,22 +451,16 @@ async function autoGenerateAlerts(request, env) {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  const status = await env.DB.prepare("SELECT * FROM system_status WHERE id = 1").first();
   const settings = await env.DB.prepare("SELECT step FROM settings WHERE id = 1").first();
-
-  if (!isEaOnline(status?.last_seen) || status?.price == null) {
-    return json(
-      { error: "EA当前离线，无法获取最新黄金价格。", code: "EA_OFFLINE" },
-      409
-    );
+  const currentPrice = Number(body.price);
+  if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
+    return json({ error: "还没有 EA 价格" }, 400);
   }
 
   let step = body.step != null ? Number(body.step) : Number(settings?.step ?? 5);
   if (!Number.isFinite(step) || step <= 0) {
     return json({ error: "Invalid step" }, 400);
   }
-
-  const currentPrice = Number(status.price);
   // Integer part is the center row, e.g. 4181.2 → 4181 (default off)
   const base = Math.trunc(currentPrice);
   const prices = [];
@@ -372,8 +547,110 @@ async function eaHeartbeat(request, env) {
   });
 }
 
+async function eaSync(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const bid = Number(body.bid);
+  const ask = Number(body.ask);
+  const price = Number(body.price);
+  const version = Number(body.version);
+  const symbol = String(body.symbol || "XAUUSD").slice(0, 32);
+  const now = new Date().toISOString();
+  const interval = Number(body.interval);
+  const syncSeconds = Number.isInteger(interval) && interval >= 3 && interval <= 3600 ? interval : null;
+  await ensureSyncSecondsColumn(env);
+
+  if (Number.isFinite(price) && price > 0) {
+    if (syncSeconds != null) {
+      await env.DB.prepare(
+        `UPDATE system_status SET
+          symbol = ?,
+          price = ?,
+          bid = ?,
+          ask = ?,
+          ea_online = 1,
+          last_seen = ?,
+          updated_at = ?,
+          sync_seconds = ?
+         WHERE id = 1`
+      )
+        .bind(
+          symbol,
+          price,
+          Number.isFinite(bid) ? bid : price,
+          Number.isFinite(ask) ? ask : price,
+          now,
+          now,
+          syncSeconds
+        )
+        .run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE system_status SET
+          symbol = ?,
+          price = ?,
+          bid = ?,
+          ask = ?,
+          ea_online = 1,
+          last_seen = ?,
+          updated_at = ?
+         WHERE id = 1`
+      )
+        .bind(
+          symbol,
+          price,
+          Number.isFinite(bid) ? bid : price,
+          Number.isFinite(ask) ? ask : price,
+          now,
+          now
+        )
+        .run();
+    }
+  }
+
+  const status = await env.DB.prepare(
+    "SELECT config_version FROM system_status WHERE id = 1"
+  ).first();
+  const currentVersion = status?.config_version ?? 1;
+  if (Number.isInteger(version) && version === currentVersion && Array.isArray(body.alerts)) {
+    const { results } = await env.DB.prepare(
+      "SELECT id, enabled, triggered FROM alerts"
+    ).all();
+    const byId = new Map((results || []).map((row) => [row.id, row]));
+    const statements = [];
+    for (const item of body.alerts) {
+      const id = Number(item.id);
+      const existing = byId.get(id);
+      if (!existing) continue;
+      const enabled = item.enabled === true || item.enabled === 1;
+      const wasEnabled = existing.enabled === 1 || existing.enabled === true;
+      const triggered = !enabled && wasEnabled ? 1 : enabled ? 0 : existing.triggered ? 1 : 0;
+      const nextEnabled = enabled ? 1 : 0;
+      const prevEnabled = wasEnabled ? 1 : 0;
+      const prevTriggered = existing.triggered ? 1 : 0;
+      if (nextEnabled === prevEnabled && triggered === prevTriggered) continue;
+      statements.push(
+        env.DB.prepare(
+          "UPDATE alerts SET enabled = ?, triggered = ?, updated_at = datetime('now') WHERE id = ?"
+        ).bind(nextEnabled, triggered, id)
+      );
+    }
+    if (statements.length > 0) await env.DB.batch(statements);
+  }
+
+  return await getConfig(env);
+}
+
 async function getConfig(env) {
-  const status = await env.DB.prepare("SELECT symbol, config_version FROM system_status WHERE id = 1").first();
+  await ensureUsageColumns(env);
+  const status = await env.DB.prepare(
+    "SELECT symbol, config_version, usage_request FROM system_status WHERE id = 1"
+  ).first();
   const settings = await env.DB.prepare("SELECT alerts_enabled FROM settings WHERE id = 1").first();
   const alertsEnabled = settings?.alerts_enabled !== 0;
 
@@ -394,6 +671,7 @@ async function getConfig(env) {
       enabled: !!a.enabled,
     })),
     version: status?.config_version ?? 1,
+    usage_request: status?.usage_request || 0,
   });
 }
 

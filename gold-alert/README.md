@@ -260,14 +260,12 @@ https://gold-alert.xxxxx.workers.dev
 
 ---
 
-## 九-B、网站设定 → OneDrive → EA（不经过 Cloudflare 轮询）
+## 九-B、网页和 EA 都走 Cloudflare，触发后 EA 直接发 Telegram
 
-网页平时不刷新。只有点「设定」才读取 EA 写在 OneDrive 里的现价，生成提醒并写回。EA 只读本地文件。
+EA 按间隔向 Cloudflare 发 **一次** 请求：带上最新价格、哪些提醒还在触发，并在同一次响应里取回已保存的提醒。网页没有「刷新」按钮。页面打开时，按这个间隔读取 EA 刚写入的价格和使用情况。设定和保存写入 Cloudflare。价格穿越后，EA 直接把消息发给 Telegram。
 
-- 说明与 Azure 应用注册：`https://alertdata.pages.dev/onedrive.html`
-- EA：`InpUseLocalFile = true`，Cloudflare 地址留空
-- 电脑运行一次：`scripts/link-onedrive-alerts.bat`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.08）
+- 手机网页：`https://alertdata.pages.dev/`
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.17）
 
 ---
 
@@ -275,26 +273,22 @@ https://gold-alert.xxxxx.workers.dev
 
 1. Safari 打开：`https://alertdata.pages.dev/`
 2. **第一次**输入 **API Token**，点「解锁」
-3. 以后再打开：本机已记住 Token，直接进入，不用再输入。只有新设备第一次才要 Token（点「退出」才会清除）
-4. 页面会显示：
-   - **GOLD ALERT**
-   - XAUUSD 当前价格（来自 EA 上传的 MT5 价格）
-   - EA 在线 / 离线状态
-5. 设置间隔（例如 `5`）
-6. 可「设定」生成上下各 7 档 + 当前整数价（最多 15 个）
-7. 点「保存设置」
+3. 页面按 EA 的间隔显示最新价格。已触发过的提醒显示「已用」。没有「刷新」按钮
+4. 设置间隔（例如 `5`），点「设定」按当前 EA 价格生成提醒
+5. 点「保存设置」，提醒写入 Cloudflare，EA 下次同步时取回
 
 ### 功能说明
 
 | 功能 | 说明 |
 |------|------|
-| 当前价格 | 最近一次 EA 上传的 MT5 XAUUSD 价格 |
-| EA 状态 | `last_seen` 超过约 15 秒 → 🔴 离线 |
-| 自动生成 | 以当前整数价为中心，上下各 7 档 + 中间一档（最多 15 个） |
-| 保存设置 | 写入 D1，EA 约 3 秒内自动同步 |
-| 全部清除 | 删除全部提醒 |
+| 当前价格 | EA 每次同步写入的最新价。页面打开时按同样间隔更新。还没有价格时显示 `--` |
+| 已用 | EA 在同一次同步里报上哪些提醒已经触发。页面上按钮变成「已用」 |
+| 自动生成 | 以当前 EA 价格的整数为中心，上下各 7 档 + 中间一档（最多 15 个），写入 Cloudflare |
+| 保存设置 | 写入 Cloudflare，EA 下次同步时取回 |
+| 全部清除 | 删除 Cloudflare 上的全部提醒 |
+| 触发通知 | EA 发现穿越后直接发 Telegram，不经过 Cloudflare |
 
-> 网页关闭后，EA **继续工作**。重新打开网页会从 API 读取最新状态。
+> 网页关掉或切到后台后，页面不再读取。EA **继续**按间隔做那一次同步。重新打开网页会读到 EA 刚写入的价格和提醒。
 
 ---
 
@@ -307,17 +301,18 @@ https://gold-alert.xxxxx.workers.dev
 3. 进入：`MQL5 / Experts`
 4. 把本项目的 `mt5/GoldPriceAlert.mq5` 复制进去
 
-### 11.2 用 MetaEditor 编译
+### 11.2 编译
 
-1. 在 MT5 中按 **F4** 打开 MetaEditor  
-   （或：工具 → MetaQuotes Language Editor）
-2. 在左侧导航找到 `Experts / GoldPriceAlert.mq5`
-3. 打开后按 **F7**（Compile）编译
-4. 下方应显示 `0 error(s)`
-5. 回到 MT5，在「导航」→「Expert Advisors」中应出现 **GoldPriceAlert**
+网站上的 `.mq5` 不能直接被 MT5 运行。编译器在你这台 Windows 的 MT5 里。双击下面的脚本会下载最新源码，调用本机 MetaEditor 编译，并覆盖 `GoldPriceAlert.ex5`。不用打开 MetaEditor 按 F7。
 
-> Cursor / 本开发环境 **无法直接编译 MQL5**。  
-> 必须在 Windows 上的 **MetaEditor** 中编译。
+1. 把这两个文件下载到同一个文件夹
+   - `https://alertdata.pages.dev/compile-gold-alert.bat`
+   - `https://alertdata.pages.dev/compile-gold-alert.ps1`
+2. 先打开过一次 MetaTrader 5
+3. 双击 `compile-gold-alert.bat`
+4. 看到「已覆盖」后，图表上的 EA 通常会自动重新加载。Experts 里应出现新的 `EA initialized` 版本
+
+仍想手工编译时：在 MT5 按 **F4** 打开 MetaEditor，打开 `Experts / GoldPriceAlert.mq5`，按 **F7**。下方应显示 `0 error(s)`。
 
 ### 11.3 允许 WebRequest（必须做，否则 EA 无法联网）
 
@@ -325,10 +320,11 @@ https://gold-alert.xxxxx.workers.dev
 2. 打开 **Expert Advisors**（智能交易）
 3. 勾选：**允许算法交易**（Allow Algo Trading）
 4. 勾选：**允许 WebRequest 访问下列 URL**（Allow WebRequest for listed URL）
-5. 在列表中 **添加你的 Worker 地址**，例如：
+5. 在列表中 **添加这两个地址**：
 
 ```
-https://gold-alert.xxxxx.workers.dev
+https://alertdata.pages.dev
+https://api.telegram.org
 ```
 
 6. 点「确定」
@@ -343,26 +339,38 @@ https://gold-alert.xxxxx.workers.dev
 
 | 参数 | 示例 | 说明 |
 |------|------|------|
-| `InpApiBaseUrl` | `https://gold-alert.xxxxx.workers.dev` | **不要**末尾斜杠 |
+| `InpApiBaseUrl` | `https://alertdata.pages.dev` | **不要**末尾斜杠 |
 | `InpApiToken` | （你的 API Token） | 与 Cloudflare Secret 相同 |
 | `InpSymbol` | （留空） | 留空 = 使用当前图表品种 |
-| `InpSyncSeconds` | `3` | 每 3 秒同步服务器 |
-| `InpEnableTelegram` | `true` | 触发后通知 Cloudflare 发 Telegram |
+| `InpSyncSeconds` | `3` | 没有间隔文件时使用。小于 3 会按 3 秒。有 `gold-alert-interval.txt` 时以文件为准 |
+| `InpEnableTelegram` | `true` | 穿越后由 EA 直接发 Telegram |
+| `InpTelegramBotToken` | BotFather 给的 Token | |
+| `InpTelegramChatId` | 你的 Chat ID | |
 
 4. 勾选「允许算法交易」
 5. 确认 MT5 顶部「Algo Trading」按钮为 **绿色开启**
+
+### 11.4b 在电脑上改取提醒间隔
+
+EA 为 v1.17 并正在运行时，不用打开 MT5 参数。间隔大于 1 分钟时，每分钟看一次新秒数，改小后大约 1 分钟生效，不用等上一段大间隔走完。间隔小于 1 分钟时，按那个秒数查看和发送。Cloudflare 请求仍按设定的秒数发送。
+
+1. 下载并双击：`https://alertdata.pages.dev/set-alert-interval.bat`
+2. 输入秒数（3 到 3600），回车
+3. Experts 大约 1 分钟内出现 `Pull interval updated: Ns`。间隔小于 1 分钟时，会更快
+
+文件写在 `%APPDATA%\MetaQuotes\Terminal\Common\Files\gold-alert-interval.txt`。删掉这个文件后，EA 回到图表参数 `InpSyncSeconds`。
 
 ### 11.5 查看日志
 
 打开 MT5 下方 **「专家」(Experts)** 标签，应看到类似：
 
 ```
-[GoldAlert] EA initialized
+[GoldAlert] EA initialized v1.17
+[GoldAlert] Sync every 3s: price, usage, and alerts in one request.
 [GoldAlert] Symbol: XAUUSD
 [GoldAlert] API connected
 [GoldAlert] Config version: 1
 [GoldAlert] Loaded 0 alerts
-[GoldAlert] Price: 3978.25
 ```
 
 若出现：
@@ -399,14 +407,15 @@ Authorization: Bearer <API_TOKEN>
 
 | 方法 | 路径 | 用途 |
 |------|------|------|
-| GET | `/api/status` | 当前价格、EA 在线状态 |
+| POST | `/api/ea/sync` | EA 的唯一周期请求：上报价格和使用情况，响应里带回已保存的提醒 |
+| GET | `/api/status` | 网页打开时读取 EA 刚写入的价格、提醒和使用情况 |
 | GET | `/api/alerts` | 提醒列表 |
 | POST | `/api/alerts` | 保存提醒（最多 15） |
 | DELETE | `/api/alerts/:id` | 删除单个提醒 |
 | POST | `/api/alerts/auto` | 按当前 EA 价格自动生成 ±7 档 |
-| POST | `/api/ea/heartbeat` | EA 心跳 + 上传价格 |
-| GET | `/api/config` | EA 拉取提醒配置（含 version） |
-| POST | `/api/alert-trigger` | EA 通知触发 → Worker 发 Telegram |
+| POST | `/api/ea/heartbeat` | 旧接口。当前 EA 不调用 |
+| GET | `/api/config` | 旧接口。内容和同步响应相同，当前 EA 不单独请求 |
+| POST | `/api/alert-trigger` | 保留接口。当前 EA 不调用，Telegram 由 EA 直发 |
 | GET/POST | `/api/settings` | 间隔等设置 |
 
 ### 自动生成示例
@@ -428,14 +437,8 @@ Authorization: Bearer <API_TOKEN>
 - **上涨穿越**：上一价 `< P` 且 当前价 `>= P` → 发送 ↑ 上涨
 - **下跌穿越**：上一价 `> P` 且 当前价 `<= P` → 发送 ↓ 下跌
 
-触发后，价格继续停在同一侧 **不会重复提醒**。  
-必须重新穿越到另一侧后，才允许同方向再次提醒。
-
-服务器也会：
-
-1. 拒绝同一 `alert_id` 的同方向连续触发
-2. 当价格回到另一侧时重新解锁（通过 heartbeat）
-3. 短时间防抖，避免重复发送
+触发后，这一档在 EA 里关闭，价格继续停在同一侧 **不会重复提醒**。  
+在网页上重新保存并启用后，EA 下次拉取配置才会再次提醒。
 
 Telegram 消息示例：
 
@@ -451,18 +454,18 @@ Telegram 消息示例：
 
 | # | 测试 | 期望结果 |
 |---|------|----------|
-| 1 | EA 挂载并联网 | 网页显示 🟢 EA 在线 + 当前价 |
-| 2 | 手机添加 `4000` 并保存 | EA 日志出现同步到 4000 |
-| 3 | 点「设定」 | 生成 15 个价格 |
+| 1 | EA 挂载并联网 | Experts 出现 `Sync every 3s: price, usage, and alerts in one request.` 和 `API connected` |
+| 2 | 手机添加 `4000` 并保存 | EA 下次同步日志出现 Loaded，含 4000 |
+| 3 | 点「设定」 | 按 EA 价格生成 15 个价格 |
 | 4 | 间隔改为 `10` 再生成 | 间隔为 10 |
-| 5 | 删除一个价格并保存 | EA 约 3 秒内同步 |
-| 6 | 价格向上穿越 | Telegram 收到 ↑ 上涨 |
-| 7 | 价格向下穿越 | Telegram 收到 ↓ 下跌 |
+| 5 | 删除一个价格并保存 | EA 下次同步取回 |
+| 6 | 价格向上穿越 | Telegram 收到 `提醒价 _ 现价`，Experts 出现 ALERT UP |
+| 7 | 价格向下穿越 | Telegram 收到 `提醒价 _ 现价`，Experts 出现 ALERT DOWN |
 | 8 | 同侧持续波动 | **不**重复发送 |
 | 9 | 重新穿越 | 可再次提醒 |
-| 10 | 关闭手机网页 | EA 仍继续工作 |
-| 11 | 关闭 EA，等 >15 秒 | 网页 🔴 EA 离线 |
-| 12 | 重启 EA | 网页恢复 🟢 EA 在线 |
+| 10 | 关闭手机网页 | 页面停止读取。EA 仍继续那一次同步 |
+| 11 | 打开网页 | 没有「刷新」按钮。价格是 EA 上报的价，已触发的提醒显示「已用」 |
+| 12 | 关掉网页再打开 | 仍显示 EA 最新价格，已保存的提醒还在 |
 
 ---
 
@@ -470,23 +473,22 @@ Telegram 消息示例：
 
 ### Q: WebRequest Error=4060
 
-在 MT5：**工具 → 选项 → Expert Advisors**，把 Worker URL 加入白名单。
+在 MT5：**工具 → 选项 → Expert Advisors**，把 `https://alertdata.pages.dev` 和 `https://api.telegram.org` 加入白名单。
 
 ### Q: 如何远程暂停 EA 提醒？
 
-电脑上的 MT5 无法从网页直接关闭。网页有 **暂停提醒 / 恢复提醒**：暂停后 EA 仍上传价格（显示在线），但约 3 秒内不再触发 Telegram。恢复后继续按已选中的价格提醒。
+电脑上的 MT5 无法从网页直接关闭。网页有 **暂停提醒 / 恢复提醒**：暂停后 EA 约 3 秒内不再触发 Telegram。恢复后继续按已选中的价格提醒。
 
-### Q: 网页显示 EA 离线
+### Q: 怎么确认 EA 在取提醒？
 
-1. 确认 EA 已挂载且 Algo Trading 为绿色  
-2. 确认 `InpApiBaseUrl` / `InpApiToken` 正确  
-3. 查看 Experts 日志是否有 WebRequest 错误  
+网页不再显示在线或离线。看 MT5 Experts：应有 `EA initialized v1.17`、`Sync every 3s: price, usage, and alerts in one request.`、`API connected`。保存提醒后下次同步出现新的 `Loaded`。
 
 ### Q: 收不到 Telegram
 
-1. 确认已 `wrangler secret put TELEGRAM_BOT_TOKEN` 和 `TELEGRAM_CHAT_ID`  
-2. 确认你已给 Bot 发过 `/start`  
-3. 用 EA 触发一次，看 Worker 日志：`npx wrangler tail`  
+1. EA 参数里勾选 `InpEnableTelegram`，并填 `InpTelegramBotToken`、`InpTelegramChatId`  
+2. 确认已给 Bot 发过 `/start`  
+3. WebRequest 白名单包含 `https://api.telegram.org`  
+4. 触发后 Experts 应出现 `Telegram sent`。若是 Error=4060，回到 11.3 
 
 ### Q: XM 黄金不是叫 XAUUSD？
 
@@ -494,7 +496,7 @@ Telegram 消息示例：
 
 ### Q: EA 日志会不会把硬盘写满？
 
-默认不会。心跳和报价不再每 3 秒写日志，只在启动、配置变化、触发提醒或出错时记录。  
+默认不会。心跳和报价不再写日志，只在启动、配置变化、触发提醒或出错时记录。  
 MT5 日志在数据文件夹的 `Logs` / `MQL5\Logs`，通常按天分文件。旧日志可手动删除。需要详细报价日志时，把 EA 参数 `InpVerboseLog` 设为 `true`。
 
 ### Q: 手机 Token 忘了？

@@ -10,29 +10,29 @@
   <title>GOLD ALERT</title>
   <link rel="icon" href="/icon.jpg" type="image/jpeg" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-  <link rel="stylesheet" href="/style.css?v=25" />
+  <link rel="stylesheet" href="/style.css?v=32" />
 </head>
 <body>
+  <!-- Token unlock screen (API token never hardcoded) -->
   <div id="auth-screen" class="screen">
     <div class="auth-box">
       <div class="brand-lockup brand-lockup-auth">
         <img src="/icon.jpg" alt="" class="brand-icon brand-icon-lg" />
         <h1 class="brand">GOLD ALERT</h1>
       </div>
-      <p id="auth-hint" class="auth-hint">用 Microsoft 登录 OneDrive。点「设定」才取现价并写入提醒，平时不刷新。</p>
+      <p id="auth-hint" class="auth-hint">新设备输入一次 Token，本机以后不用再输入</p>
       <div id="token-panel">
         <input
-          id="azure-client-id"
-          type="text"
-          autocomplete="off"
+          id="token-input"
+          type="password"
+          autocomplete="current-password"
           autocapitalize="off"
           spellcheck="false"
-          placeholder="Azure 应用 ID（Client ID）"
+          placeholder="API Token"
           class="input"
         />
-        <button id="btn-unlock" class="btn btn-primary btn-block" type="button">登录 Microsoft</button>
+        <button id="btn-unlock" class="btn btn-primary btn-block" type="button">解锁</button>
       </div>
-      <p class="panel-hint" style="margin-top:12px">设置说明：<a href="/onedrive.html" style="color:#d4a017">onedrive.html</a></p>
       <p id="auth-error" class="error-msg hidden"></p>
     </div>
   </div>
@@ -44,20 +44,16 @@
         <img src="/icon.jpg" alt="" class="brand-icon" />
         <h1 class="brand">GOLD ALERT</h1>
       </div>
-      <button id="btn-logout" class="btn-ghost" type="button" title="退出 Microsoft">退出</button>
+      <button id="btn-logout" class="btn-ghost" type="button" title="清除 Token">退出</button>
     </header>
 
     <section class="hero-price">
       <div class="symbol" id="symbol">XAUUSD</div>
-      <div class="label">当前价格</div>
+      <div class="label" id="price-label">当前价格</div>
       <div class="price" id="current-price">--</div>
       <div class="bid-ask">
         <span>Bid <strong id="bid">--</strong></span>
         <span>Ask <strong id="ask">--</strong></span>
-      </div>
-      <div id="ea-status" class="ea-status offline">
-        <span class="dot"></span>
-        <span id="ea-status-text">EA 离线</span>
       </div>
     </section>
 
@@ -100,7 +96,6 @@
     </footer>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.27.0/lib/msal-browser.min.js"></script>
-  <script src="/app.js?v=25"></script>
+  <script src="/app.js?v=32"></script>
 </body>
 </html>
