@@ -37,6 +37,6 @@ if !SEC! GTR 3600 (
 <nul set /p "=!SEC!" > "%DEST%\gold-alert-interval.txt"
 echo.
 echo 已设为 !SEC! 秒。
-echo EA v1.16 正在运行时，大约 1 秒后改间隔，Experts 会出现 Pull interval updated。
+echo EA v1.17 正在运行时，大约 1 分钟内改间隔，Experts 会出现 Pull interval updated。
 echo.
 pause

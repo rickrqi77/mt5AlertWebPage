@@ -265,7 +265,7 @@ https://gold-alert.xxxxx.workers.dev
 EA 按间隔向 Cloudflare 发 **一次** 请求：带上最新价格、哪些提醒还在触发，并在同一次响应里取回已保存的提醒。网页没有「刷新」按钮。页面打开时，按这个间隔读取 EA 刚写入的价格和使用情况。设定和保存写入 Cloudflare。价格穿越后，EA 直接把消息发给 Telegram。
 
 - 手机网页：`https://alertdata.pages.dev/`
-- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.16）
+- 下载 EA：`https://alertdata.pages.dev/GoldPriceAlert.mq5`（v1.17）
 
 ---
 
@@ -351,11 +351,11 @@ https://api.telegram.org
 
 ### 11.4b 在电脑上改取提醒间隔
 
-EA 为 v1.16 并正在运行时，不用打开 MT5 参数。改完大约 1 秒生效，不用等上一段大间隔走完。Cloudflare 请求仍按新的秒数发送。
+EA 为 v1.17 并正在运行时，不用打开 MT5 参数。间隔大于 1 分钟时，每分钟看一次新秒数，改小后大约 1 分钟生效，不用等上一段大间隔走完。间隔小于 1 分钟时，按那个秒数查看和发送。Cloudflare 请求仍按设定的秒数发送。
 
 1. 下载并双击：`https://alertdata.pages.dev/set-alert-interval.bat`
 2. 输入秒数（3 到 3600），回车
-3. Experts 大约 1 秒后出现 `Pull interval updated: Ns`
+3. Experts 大约 1 分钟内出现 `Pull interval updated: Ns`。间隔小于 1 分钟时，会更快
 
 文件写在 `%APPDATA%\MetaQuotes\Terminal\Common\Files\gold-alert-interval.txt`。删掉这个文件后，EA 回到图表参数 `InpSyncSeconds`。
 
@@ -364,7 +364,7 @@ EA 为 v1.16 并正在运行时，不用打开 MT5 参数。改完大约 1 秒�
 打开 MT5 下方 **「专家」(Experts)** 标签，应看到类似：
 
 ```
-[GoldAlert] EA initialized v1.16
+[GoldAlert] EA initialized v1.17
 [GoldAlert] Sync every 3s: price, usage, and alerts in one request.
 [GoldAlert] Symbol: XAUUSD
 [GoldAlert] API connected
@@ -480,7 +480,7 @@ Telegram 消息示例：
 
 ### Q: 怎么确认 EA 在取提醒？
 
-网页不再显示在线或离线。看 MT5 Experts：应有 `EA initialized v1.16`、`Sync every 3s: price, usage, and alerts in one request.`、`API connected`。保存提醒后下次同步出现新的 `Loaded`。
+网页不再显示在线或离线。看 MT5 Experts：应有 `EA initialized v1.17`、`Sync every 3s: price, usage, and alerts in one request.`、`API connected`。保存提醒后下次同步出现新的 `Loaded`。
 
 ### Q: 收不到 Telegram
 

@@ -7,7 +7,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.16"
+#property version   "1.17"
 #property description "XAUUSD gold price alert EA. One request sends price and alert usage, and receives saved alerts. Telegram sent by the EA."
 
 //--- inputs
@@ -58,7 +58,7 @@ bool ApplySyncInterval(const bool startup);
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(LOG_PREFIX, "EA initialized v1.16");
+   Print(LOG_PREFIX, "EA initialized v1.17");
    if(InpEnableTelegram && StringLen(InpTelegramBotToken) > 0 && StringLen(InpTelegramChatId) > 0)
       Print(LOG_PREFIX, "Telegram: on (direct, not via Cloudflare)");
    else
@@ -101,9 +101,9 @@ void OnDeinit(const int reason)
 }
 
 //+------------------------------------------------------------------+
-//| Timer: read the interval file every second. The Cloudflare POST  |
-//| still happens once per saved interval, so a smaller interval    |
-//| starts within about a second instead of waiting out the old one.|
+//| Timer: re-read the interval file at least every minute. A sync  |
+//| shorter than 60s keeps that shorter timer. The Cloudflare POST  |
+//| still happens once per saved interval.                          |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
@@ -159,8 +159,11 @@ bool ApplySyncInterval(const bool startup)
    int sec = ResolveSyncSeconds();
    if(!startup && sec == g_syncSeconds)
       return true;
-   // Local one-second timer. HTTP still waits for sec.
-   if(!EventSetTimer(1))
+   // Look at least every minute. A shorter sync interval uses that interval.
+   int timerSec = sec;
+   if(timerSec > 60)
+      timerSec = 60;
+   if(!EventSetTimer(timerSec))
    {
       Print(LOG_PREFIX, "ERROR: EventSetTimer failed");
       return false;
