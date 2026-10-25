@@ -12,7 +12,7 @@ struct Quote: Equatable, Sendable {
     var isValid: Bool { price > 0 && bid > 0 && ask > 0 }
 }
 
-struct AlertItem: Identifiable, Equatable, Hashable, Sendable {
+struct AlertItem: Identifiable, Equatable, Hashable, Sendable, Codable {
     var id: Int?
     /// Stable identity for SwiftUI lists when server id is missing.
     var localID: UUID = UUID()

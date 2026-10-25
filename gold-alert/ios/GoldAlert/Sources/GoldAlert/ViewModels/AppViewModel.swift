@@ -38,6 +38,11 @@ final class AppViewModel: ObservableObject {
         if !token.isEmpty {
             isUnlocked = true
         }
+        // Show the last-known state instantly; refreshCloudState() updates it in the background.
+        alerts = LocalCache.loadAlerts() ?? []
+        if let s = LocalCache.loadStep() { step = s }
+        if let p = LocalCache.loadPaused() { alertsPaused = p }
+        if let o = LocalCache.loadOnline() { eaOnline = o }
     }
 
     func setPollSeconds(_ seconds: Double) {
@@ -116,6 +121,7 @@ final class AppViewModel: ObservableObject {
         quote = .empty
         isUnlocked = false
         authError = nil
+        LocalCache.clear()
     }
 
     func startLoops() {
@@ -133,6 +139,13 @@ final class AppViewModel: ObservableObject {
     func stopLoops() {
         priceTask?.cancel()
         priceTask = nil
+    }
+
+    private func persistState() {
+        LocalCache.saveAlerts(alerts)
+        LocalCache.saveStep(step)
+        LocalCache.savePaused(alertsPaused)
+        LocalCache.saveOnline(eaOnline)
     }
 
     /// Swissquote is display-only on device. Cloudflare only gets alert/settings for the EA.
@@ -162,6 +175,7 @@ final class AppViewModel: ObservableObject {
             if !alertsDirty {
                 alerts = remote.alerts.map { $0.asItem() }
             }
+            persistState()
         } catch AppError.unauthorized {
             logout()
             authError = "Token 无效"
@@ -188,6 +202,7 @@ final class AppViewModel: ObservableObject {
             alerts = (data.alerts ?? []).map { $0.asItem() }
             alertsDirty = false
             if let s = data.step, s > 0 { step = s }
+            persistState()
             flashDone()
         } catch {
             showToast(error.localizedDescription, error: true)
@@ -216,6 +231,7 @@ final class AppViewModel: ObservableObject {
             )
             alerts = (data.alerts ?? []).map { $0.asItem() }
             alertsDirty = false
+            persistState()
             flashDone()
         } catch {
             showToast(error.localizedDescription, error: true)
@@ -235,6 +251,7 @@ final class AppViewModel: ObservableObject {
                 step: step
             )
             alertsDirty = false
+            persistState()
             showToast("已全部清除", error: false)
         } catch {
             showToast(error.localizedDescription, error: true)
@@ -251,6 +268,7 @@ final class AppViewModel: ObservableObject {
                 paused: !alertsPaused
             )
             alertsPaused = data.paused ?? !alertsPaused
+            persistState()
         } catch {
             showToast(error.localizedDescription, error: true)
         }
