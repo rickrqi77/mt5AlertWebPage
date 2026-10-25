@@ -17,16 +17,15 @@ struct AlertRowView: View {
             Text("\(index + 1).")
                 .font(.body.monospacedDigit())
                 .foregroundStyle(Color.white.opacity(0.45))
-                .frame(width: 26, alignment: .leading)
+                .frame(width: 28, alignment: .leading)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .layoutPriority(1)
-                .padding(.leading, -8)
 
             SelectAllPriceField(text: $draft)
             .padding(.horizontal, 10)
             .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+            .frame(maxWidth: 160, minHeight: 40, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
             .onAppear { draft = item.priceText }
             .onChange(of: item.priceText) { _, newValue in
