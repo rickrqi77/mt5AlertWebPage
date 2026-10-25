@@ -17,11 +17,11 @@ struct AlertRowView: View {
             Text("\(index + 1).")
                 .font(.body.monospacedDigit())
                 .foregroundStyle(Color.white.opacity(0.45))
-                .frame(width: 28, alignment: .leading)
+                .frame(width: 26, alignment: .leading)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
                 .layoutPriority(1)
-                .padding(.leading, -4)
+                .padding(.leading, -8)
 
             SelectAllPriceField(text: $draft)
             .padding(.horizontal, 10)
