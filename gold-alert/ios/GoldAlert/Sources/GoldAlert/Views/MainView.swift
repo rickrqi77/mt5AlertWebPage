@@ -252,12 +252,15 @@ struct MainView: View {
     private var visibleRowsHeight: CGFloat {
         let n = min(model.alerts.count, 9)
         guard n > 0 else { return 0 }
-        return CGFloat(n) * alertRowHeight + CGFloat(n - 1) * Self.alertRowSpacing
+        let h = CGFloat(n) * alertRowHeight + CGFloat(n - 1) * Self.alertRowSpacing
+        // With more than 9 alerts, shave a small margin so the 10th row stays fully
+        // below the visible region (row 9 only loses bottom padding, which is invisible).
+        return model.alerts.count > 9 ? h - 8 : h
     }
 
     /// Measures the real height of one AlertRowView so the 9-row box stays exact.
     private struct AlertRowHeightKey: PreferenceKey {
-        static let defaultValue: CGFloat = 48
+        static let defaultValue: CGFloat = 42
         static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
             value = nextValue()
         }
