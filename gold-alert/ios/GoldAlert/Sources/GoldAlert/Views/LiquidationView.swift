@@ -54,7 +54,7 @@ struct LiquidationView: View {
             }
             .pickerStyle(.segmented)
             .controlSize(.large)
-            .frame(minHeight: 40)
+            .frame(minHeight: 48)
 
             Button {
                 Task { await model.readLatestScreenshotAndCalculate() }
