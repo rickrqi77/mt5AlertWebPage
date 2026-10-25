@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Safari OTA manifest.plist + index.html for an Ad Hoc IPA (onsite)."""
+"""Generate Safari OTA manifest.plist + index.html for an Ad Hoc IPA (ota-site)."""
 
 from __future__ import annotations
 
@@ -140,7 +140,7 @@ code {{ word-break: break-all; font-size: 11px; }}
 </html>
 """
     (out / "index.html").write_text(html, encoding="utf-8")
-    print(f"onsite:   {out}")
+    print(f"ota-site: {out}")
     print(f"manifest: {out / 'manifest.plist'}")
     print(f"index:    {out / 'index.html'}")
     print(f"ipa:      {dest_ipa}")

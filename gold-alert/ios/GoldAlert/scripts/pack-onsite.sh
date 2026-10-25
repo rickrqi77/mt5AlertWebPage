@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 拉代码 → xtool 编译 → zsign Ad Hoc 签名 → 写入 D:\onsite\goldalert
+# 拉代码 → xtool 编译 → zsign Ad Hoc 签名 → 写入 D:\ota-site\goldalert
 # Safari 打开 https://w77.tail708c1b.ts.net/goldalert/ 即可安装（与交通查询同样的网页安装方式）。
+# 只写 goldalert 子目录，不改动 D:\ota-site 下其它包的文件。
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
 fi
@@ -10,8 +11,9 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ios_dir="$(cd "$script_dir/.." && pwd)"
 repo_dir="$(cd "$ios_dir/../.." && pwd)"
 
-# Windows D:\onsite\goldalert  （WSL: /mnt/d/onsite/goldalert）
-onsite_dir="${ONSITE_DIR:-/mnt/d/onsite/goldalert}"
+# Windows D:\ota-site\goldalert  （WSL: /mnt/d/ota-site/goldalert）
+# ONSITE_DIR 仍可用（兼容旧名），优先 OTA_SITE_DIR。
+onsite_dir="${OTA_SITE_DIR:-${ONSITE_DIR:-/mnt/d/ota-site/goldalert}}"
 adhoc_dir="${ADHOC_DIR:-/mnt/d/goldalert/adhoc}"
 base_url="${OTA_BASE_URL:-https://w77.tail708c1b.ts.net/goldalert}"
 
@@ -156,6 +158,6 @@ cat <<EOF
   $onsite_dir\\manifest.plist
   $onsite_dir\\$ipa_name
 
-确认 Tailscale / 本机已把 https://w77.tail708c1b.ts.net 指到 D:\\onsite（或把 goldalert 目录挂在该站点下）。
+确认 Tailscale / 本机已把 https://w77.tail708c1b.ts.net 指到 D:\\ota-site（goldalert 为其子目录，不影响其它包）。
 iPhone 用 Safari 打开上面的地址，点「用 Safari 安装」。
 EOF

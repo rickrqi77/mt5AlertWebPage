@@ -31,7 +31,7 @@ xtool setup
 
 ## 网页安装（推荐，与交通查询相同）
 
-打包到 **`D:\onsite\goldalert`**，用 Safari 打开：
+打包到 **`D:\ota-site\goldalert`**（只写该子目录，不影响其它包），用 Safari 打开：
 
 **https://w77.tail708c1b.ts.net/goldalert/**
 
