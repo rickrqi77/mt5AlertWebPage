@@ -29,8 +29,12 @@ final class AppViewModel: ObservableObject {
     private var token = KeychainStore.readToken()
     private var baseURL = KeychainStore.readBaseURL()
     private var priceTask: Task<Void, Never>?
+    private var cloudTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
     private var doneFlashTask: Task<Void, Never>?
+
+    /// 云端状态（EA 在线小圆点、已触发）轮询间隔。
+    private static let cloudPollSeconds: Double = 3
 
     var armedCount: Int { alerts.filter(\.enabled).count }
 
@@ -134,11 +138,21 @@ final class AppViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: nanos)
             }
         }
+        // 定时刷新云端状态：EA 在线小圆点（连上后变绿）、已触发的行变成“已用”。
+        let cloudNanos = UInt64(Self.cloudPollSeconds * 1_000_000_000)
+        cloudTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: cloudNanos)
+                await self?.refreshCloudState()
+            }
+        }
     }
 
     func stopLoops() {
         priceTask?.cancel()
         priceTask = nil
+        cloudTask?.cancel()
+        cloudTask = nil
     }
 
     private func persistState() {
@@ -173,7 +187,17 @@ final class AppViewModel: ObservableObject {
             alertsPaused = status.paused == true || status.alerts_enabled == false
             if let s = status.step, s > 0 { step = s }
             if !alertsDirty {
-                alerts = remote.alerts.map { $0.asItem() }
+                let existing = alerts
+                alerts = remote.alerts.map { dto in
+                    var item = dto.asItem()
+                    // 复用稳定身份（按服务器 id，其次价格），避免刷新时重建行、滚动位置跳回顶部。
+                    let byId = existing.first(where: { $0.id != nil && $0.id == item.id })
+                    let byPrice = existing.first(where: { $0.priceText == item.priceText })
+                    if let match = byId ?? byPrice {
+                        item.localID = match.localID
+                    }
+                    return item
+                }
             }
             persistState()
         } catch AppError.unauthorized {
