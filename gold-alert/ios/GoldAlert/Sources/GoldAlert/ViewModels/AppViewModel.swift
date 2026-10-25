@@ -33,8 +33,14 @@ final class AppViewModel: ObservableObject {
     private var toastTask: Task<Void, Never>?
     private var doneFlashTask: Task<Void, Never>?
 
+    /// 启动时刻；启动缓冲内不弹瞬时网络错误（后台仍在自动重试）。
+    private var bootTime: Date?
+
     /// 云端状态（EA 在线小圆点、已触发）轮询间隔。
     private static let cloudPollSeconds: Double = 3
+
+    /// 启动缓冲时长：期间抑制“还在取得信息”的网络错误提示。
+    private static let bootGraceSeconds: TimeInterval = 8
 
     var armedCount: Int { alerts.filter(\.enabled).count }
 
@@ -130,6 +136,7 @@ final class AppViewModel: ObservableObject {
 
     func startLoops() {
         stopLoops()
+        bootTime = Date()
         Task { await refreshCloudState() }
         let nanos = UInt64(max(pollSeconds, 0.5) * 1_000_000_000)
         priceTask = Task { [weak self] in
@@ -155,6 +162,12 @@ final class AppViewModel: ObservableObject {
         cloudTask = nil
     }
 
+    /// 启动缓冲内（还在取得信息）抑制瞬时网络错误提示。
+    private var isBootGrace: Bool {
+        guard let bootTime else { return false }
+        return Date().timeIntervalSince(bootTime) < Self.bootGraceSeconds
+    }
+
     private func persistState() {
         LocalCache.saveAlerts(alerts)
         LocalCache.saveStep(step)
@@ -170,7 +183,8 @@ final class AppViewModel: ObservableObject {
             quote = q
             lastRefreshText = "现货 " + Self.clockString()
         } catch {
-            if quote.price <= 0 {
+            // 启动缓冲内仍在取得信息，瞬时网络错误不提示；持续失败才提示。
+            if quote.price <= 0, !isBootGrace {
                 showToast(error.localizedDescription, error: true)
             }
         }
@@ -204,7 +218,10 @@ final class AppViewModel: ObservableObject {
             logout()
             authError = "Token 无效"
         } catch {
-            showToast(error.localizedDescription, error: true)
+            // 启动缓冲内仍在取得信息，瞬时网络错误不提示；持续失败才提示。
+            if !isBootGrace {
+                showToast(error.localizedDescription, error: true)
+            }
         }
     }
 
