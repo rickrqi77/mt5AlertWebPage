@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 拉代码 → xtool 编译 → zsign Ad Hoc 签名 → 写入共享 D:\ota-site 根目录
-# Safari: https://w77.tail708c1b.ts.net/goldalert.html
-# 只用 goldalert-* / GOLDALERT-* 文件名，不覆盖其它 app 的 install.html / manifest.plist。
+# 拉代码 → xtool 编译 → zsign Ad Hoc 签名 → 写入共享 D:\ota-site（与其它 app 同一层）
+# 安装入口合并进 index.html：https://w77.tail708c1b.ts.net/
+# 只用 GOLDALERT-*/goldalert-* 文件名；index.html 仅更新标记区块，不整页覆盖。
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
 fi
@@ -11,7 +11,6 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ios_dir="$(cd "$script_dir/.." && pwd)"
 repo_dir="$(cd "$ios_dir/../.." && pwd)"
 
-# Shared site root: Windows D:\ota-site  （WSL: /mnt/d/ota-site）
 ota_dir="${OTA_SITE_DIR:-${ONSITE_DIR:-/mnt/d/ota-site}}"
 adhoc_dir="${ADHOC_DIR:-/mnt/d/goldalert/adhoc}"
 base_url="${OTA_BASE_URL:-https://w77.tail708c1b.ts.net}"
@@ -23,7 +22,6 @@ signed_ipa="$adhoc_dir/GOLDALERT-adhoc.ipa"
 bundle_id="com.rickrqi77.goldalert"
 app_title="GOLD ALERT"
 ipa_name="GOLDALERT-adhoc.ipa"
-page_name="goldalert.html"
 manifest_name="goldalert-manifest.plist"
 icon_name="goldalert-icon.png"
 
@@ -145,7 +143,6 @@ python3 "$script_dir/gen-ota-manifest.py" \
   --out-dir "$ota_dir" \
   --ipa-name "$ipa_name" \
   --manifest-name "$manifest_name" \
-  --page-name "$page_name" \
   --icon-name "$icon_name" \
   --icon "$icon"
 
@@ -153,15 +150,14 @@ cp -f "$ota_dir/$ipa_name" "$signed_ipa" 2>/dev/null || true
 
 cat <<EOF
 
-完成。Safari 安装页：
-  $base_url/$page_name
+完成。Safari 打开总安装页：
+  $base_url/
 
-写入 D:\\ota-site（专用文件名，不覆盖其它包）：
-  $page_name
+同一层写入（专用文件名，不覆盖其它包）：
+  index.html                 ← 合并进 GOLD ALERT 安装按钮
   $manifest_name
   $ipa_name
   $icon_name
-  index.html  （仅追加/更新 GOLD ALERT 链接区块）
 
 确认 https://w77.tail708c1b.ts.net 指向 D:\\ota-site。
 EOF

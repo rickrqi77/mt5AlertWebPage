@@ -1,6 +1,7 @@
 @echo off
 setlocal EnableExtensions
-REM Build + Ad Hoc sign + publish into shared D:\ota-site root (unique goldalert-* names).
+REM Build + Ad Hoc sign + merge install into D:\ota-site\index.html (unique goldalert-* files).
+
 REM Run from Windows; executes the WSL script.
 
 set "SCRIPT_DIR=%~dp0"
