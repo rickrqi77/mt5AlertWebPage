@@ -1,4 +1,4 @@
-# GOLD ALERT · Ad Hoc + 网页安装（D:\ota-site）
+# 提醒事项 · Ad Hoc + 网页安装（D:\ota-site）
 
 与「黄金报价 / 交通查询」共用 **`D:\ota-site`** 和同一套 **`index.html`** 安装页样式。
 
@@ -33,7 +33,7 @@ cd gold-alert/ios/GoldAlert
 
 ## 3. 安装
 
-Safari 打开 https://w77.tail708c1b.ts.net/ ，在列表里点 **Safari 安装**（GOLD ALERT）。
+Safari 打开 https://w77.tail708c1b.ts.net/ ，在列表里点 **Safari 安装**（提醒事项）。
 
 ## 4. 环境变量
 

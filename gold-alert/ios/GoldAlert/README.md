@@ -1,4 +1,4 @@
-# GOLD ALERT iOS（xtool / Ad Hoc，无需 Mac）
+# 提醒事项 iOS（xtool / Ad Hoc，无需 Mac）
 
 原生 SwiftUI App。在 Linux / Windows（WSL）上用 [xtool](https://xtool.sh) 编译、**Ad Hoc 签名**并装到 iPhone。不依赖网页；价格直接查 Swissquote，提醒写入 Cloudflare，EA 仍从 Cloudflare 拉取。
 

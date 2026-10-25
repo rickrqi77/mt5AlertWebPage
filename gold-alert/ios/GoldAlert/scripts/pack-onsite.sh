@@ -20,7 +20,7 @@ profile="$adhoc_dir/goldalert-adhoc.mobileprovision"
 pass_file="$adhoc_dir/p12.pass"
 signed_ipa="$adhoc_dir/GOLDALERT-adhoc.ipa"
 bundle_id="com.rickrqi77.goldalert"
-app_title="${OTA_TITLE:-GOLD ALERT}"
+app_title="${OTA_TITLE:-提醒事项}"
 ota_slug="${OTA_SLUG:-goldalert}"
 
 die() { echo "$1" >&2; exit 1; }

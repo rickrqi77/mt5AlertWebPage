@@ -5,6 +5,8 @@ import SwiftUI
 final class AppViewModel: ObservableObject {
     static let maxAlerts = 15
     static let stepChoices: [Double] = [1, 2, 3, 4, 5, 10]
+    static let pollChoices: [Double] = [0.5, 1, 2, 3, 5, 10, 15, 30]
+    private static let pollSecondsKey = "pricePollSeconds"
 
     @Published var isUnlocked = false
     @Published var tokenInput = ""
@@ -14,9 +16,9 @@ final class AppViewModel: ObservableObject {
     @Published var toastIsError = false
 
     @Published var quote = Quote.empty
-    @Published var priceLabel = "Swissquote"
     @Published var lastRefreshText = "--"
     @Published var step: Double = 5
+    @Published var pollSeconds: Double = AppViewModel.loadPollSeconds()
     @Published var alerts: [AlertItem] = []
     @Published var alertsPaused = false
     @Published var alertsDirty = false
@@ -34,6 +36,36 @@ final class AppViewModel: ObservableObject {
         if !token.isEmpty {
             isUnlocked = true
         }
+    }
+
+    func setPollSeconds(_ seconds: Double) {
+        let allowed = Self.pollChoices
+        let value = allowed.min(by: { abs($0 - seconds) < abs($1 - seconds) }) ?? 1
+        pollSeconds = value
+        UserDefaults.standard.set(value, forKey: Self.pollSecondsKey)
+        if isUnlocked {
+            startLoops()
+        }
+        showToast("刷新间隔 \(Self.pollLabel(value))", error: false)
+    }
+
+    private static func loadPollSeconds() -> Double {
+        let stored = UserDefaults.standard.object(forKey: pollSecondsKey) as? Double
+        let value = stored ?? 1
+        if pollChoices.contains(where: { abs($0 - value) < 1e-9 }) {
+            return value
+        }
+        return 1
+    }
+
+    private static func pollLabel(_ seconds: Double) -> String {
+        if seconds < 1 {
+            return String(format: "%.1f 秒", seconds)
+        }
+        if abs(seconds - seconds.rounded()) < 1e-9 {
+            return "\(Int(seconds)) 秒"
+        }
+        return String(format: "%.1f 秒", seconds)
     }
 
     func onAppear() {
@@ -87,10 +119,11 @@ final class AppViewModel: ObservableObject {
     func startLoops() {
         stopLoops()
         Task { await refreshCloudState() }
+        let nanos = UInt64(max(pollSeconds, 0.5) * 1_000_000_000)
         priceTask = Task { [weak self] in
             while !Task.isCancelled {
                 await self?.refreshSwissquote()
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                try? await Task.sleep(nanoseconds: nanos)
             }
         }
     }
@@ -106,7 +139,6 @@ final class AppViewModel: ObservableObject {
         do {
             let q = try await SwissquoteClient.shared.fetchQuote()
             quote = q
-            priceLabel = "Swissquote"
             lastRefreshText = "现货 " + Self.clockString()
         } catch {
             if quote.price <= 0 {
@@ -138,7 +170,7 @@ final class AppViewModel: ObservableObject {
 
     func autoGenerate() async {
         guard quote.isValid else {
-            showToast("还没有 Swissquote 价格", error: true)
+            showToast("还没有现货价格", error: true)
             return
         }
         busy = true
@@ -154,7 +186,7 @@ final class AppViewModel: ObservableObject {
             alerts = (data.alerts ?? []).map { $0.asItem() }
             alertsDirty = false
             if let s = data.step, s > 0 { step = s }
-            showToast(data.message ?? "已生成，默认全部触发", error: false)
+            showToast(data.message ?? "已生成", error: false)
         } catch {
             showToast(error.localizedDescription, error: true)
         }

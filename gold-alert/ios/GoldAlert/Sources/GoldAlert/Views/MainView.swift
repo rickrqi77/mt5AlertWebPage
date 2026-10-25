@@ -4,6 +4,7 @@ struct MainView: View {
     @EnvironmentObject private var model: AppViewModel
     @State private var confirmClear = false
     @State private var confirmSaveEmpty = false
+    @State private var showPollPicker = false
 
     var body: some View {
         ScrollView {
@@ -36,17 +37,36 @@ struct MainView: View {
             }
             Button("取消", role: .cancel) {}
         }
+        .confirmationDialog(
+            "价格刷新间隔",
+            isPresented: $showPollPicker,
+            titleVisibility: .visible
+        ) {
+            ForEach(AppViewModel.pollChoices, id: \.self) { seconds in
+                Button(Self.pollLabel(seconds)) {
+                    model.setPollSeconds(seconds)
+                }
+            }
+            Button("取消", role: .cancel) {}
+        }
     }
 
     private var header: some View {
         HStack {
-            HStack(spacing: 10) {
-                Image(systemName: "bitcoinsign.circle.fill")
-                    .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
-                Text("GOLD ALERT")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+            Button {
+                showPollPicker = true
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "bitcoinsign.circle.fill")
+                        .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+                    Text("提醒事项")
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityHint("点按设置价格刷新间隔")
+
             Spacer()
             Button("退出") { model.logout() }
                 .font(.subheadline)
@@ -60,20 +80,11 @@ struct MainView: View {
                 .font(.caption)
                 .tracking(2)
                 .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09).opacity(0.85))
-            Text(model.priceLabel)
-                .font(.caption)
-                .foregroundStyle(Color.white.opacity(0.45))
             Text(format(model.quote.price))
                 .font(.system(size: 40, weight: .bold).monospacedDigit())
                 .foregroundStyle(.white)
-            HStack(spacing: 24) {
-                Text("Bid \(format(model.quote.bid))")
-                Text("Ask \(format(model.quote.ask))")
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(Color.white.opacity(0.55))
 
-            Text(model.eaOnline ? "EA 在线" : "EA 离线（提醒仍由 Cloudflare 下发）")
+            Text(model.eaOnline ? "EA 在线" : "EA 离线")
                 .font(.caption2)
                 .foregroundStyle(model.eaOnline
                                  ? Color(red: 0.3, green: 0.75, blue: 0.45)
@@ -96,8 +107,9 @@ struct MainView: View {
                     }
                 }
                 .pickerStyle(.menu)
+                .frame(maxWidth: .infinity)
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.vertical, 12)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.08)))
 
                 Button {
@@ -111,6 +123,7 @@ struct MainView: View {
                         .foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
+                .frame(maxWidth: .infinity)
                 .disabled(model.busy)
             }
         }
@@ -163,10 +176,6 @@ struct MainView: View {
                     .padding(.vertical, 4)
                     .background(Capsule().fill(Color.white.opacity(0.08)))
             }
-
-            Text("设定后默认全部触发。不需要的点成「关闭」，再保存")
-                .font(.caption)
-                .foregroundStyle(Color.white.opacity(0.45))
 
             if model.alerts.isEmpty {
                 Text("暂无提醒，点「设定」生成后选择要触发的价格")
@@ -224,5 +233,15 @@ struct MainView: View {
             return String(format: "%.2f", value)
         }
         return String(format: "%.3f", value)
+    }
+
+    private static func pollLabel(_ seconds: Double) -> String {
+        if seconds < 1 {
+            return String(format: "%.1f 秒", seconds)
+        }
+        if abs(seconds - seconds.rounded()) < 1e-9 {
+            return "\(Int(seconds)) 秒"
+        }
+        return String(format: "%.1f 秒", seconds)
     }
 }

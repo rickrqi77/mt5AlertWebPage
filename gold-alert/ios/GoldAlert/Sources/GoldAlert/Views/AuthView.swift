@@ -12,7 +12,7 @@ struct AuthView: View {
                 .font(.system(size: 72))
                 .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
 
-            Text("GOLD ALERT")
+            Text("提醒事项")
                 .font(.system(size: 28, weight: .bold))
                 .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
 
