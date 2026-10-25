@@ -78,12 +78,11 @@ xtool dev
 ## 与网页 / EA 的关系
 
 ```
-iPhone App ──Swissquote──► 显示现价
+iPhone App ──Swissquote──► 只在本机显示现价 / 生成网格
      │
-     └──POST /api/app/price──► Cloudflare D1（价格快照）
-     └──POST /api/alerts*  ──► Cloudflare D1（提醒）
+     └──POST /api/alerts* ──► Cloudflare D1（提醒，给 EA 用）
                                       ▲
-MT5 EA ──POST /api/ea/sync────────────┘
+MT5 EA ──POST /api/ea/sync────────────┘（EA 自己带行情）
 ```
 
 网页可继续用，也可不再打开；App 可独立完成设定与保存。
