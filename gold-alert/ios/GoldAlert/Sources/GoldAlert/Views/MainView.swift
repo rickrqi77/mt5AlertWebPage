@@ -52,19 +52,14 @@ struct MainView: View {
 
     private var header: some View {
         HStack {
-            Button {
-                showPollPicker = true
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "bell.badge.fill")
-                        .foregroundStyle(Color(red: 0.9, green: 0.25, blue: 0.22))
-                    Text("提醒事项")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
-                }
+            HStack(spacing: 10) {
+                Image(systemName: "bell.badge.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(Color(red: 0.9, green: 0.25, blue: 0.22))
+                Text("提醒事项")
+                    .font(.system(size: 21, weight: .bold))
+                    .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
             }
-            .buttonStyle(.plain)
-            .accessibilityHint("点按设置价格刷新间隔")
 
             Spacer()
             Button("退出") { model.logout() }
@@ -89,10 +84,16 @@ struct MainView: View {
             }
 
             ZStack {
-                Text(format(model.quote.price))
-                    .font(.system(size: 40, weight: .bold).monospacedDigit())
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
+                Button {
+                    showPollPicker = true
+                } label: {
+                    Text(format(model.quote.price))
+                        .font(.system(size: 40, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("点按设置价格刷新间隔")
 
                 HStack {
                     Spacer(minLength: 0)
