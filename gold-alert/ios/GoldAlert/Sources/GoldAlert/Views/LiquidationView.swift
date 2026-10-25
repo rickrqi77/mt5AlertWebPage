@@ -81,20 +81,14 @@ struct LiquidationView: View {
         }
     }
 
-    /// Horizontal swipe switches 日元模式 ↔ 美元模式.
+    /// Any horizontal swipe toggles 日元模式 ↔ 美元模式.
     private var modeSwipeGesture: some Gesture {
         DragGesture(minimumDistance: 24, coordinateSpace: .local)
             .onEnded { value in
                 guard abs(value.translation.width) > abs(value.translation.height) else { return }
                 guard abs(value.translation.width) > 40 else { return }
                 withAnimation(.easeInOut(duration: 0.15)) {
-                    if value.translation.width < 0 {
-                        // left → 美元
-                        model.setMode(.usd)
-                    } else {
-                        // right → 日元
-                        model.setMode(.jpy)
-                    }
+                    model.toggleMode()
                 }
             }
     }
