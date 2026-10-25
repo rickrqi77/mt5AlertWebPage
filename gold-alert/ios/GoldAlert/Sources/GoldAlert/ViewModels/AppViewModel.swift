@@ -14,6 +14,7 @@ final class AppViewModel: ObservableObject {
     @Published var authError: String?
     @Published var toast: String?
     @Published var toastIsError = false
+    @Published var doneFlash = false
 
     @Published var quote = Quote.empty
     @Published var lastRefreshText = "--"
@@ -29,6 +30,7 @@ final class AppViewModel: ObservableObject {
     private var baseURL = KeychainStore.readBaseURL()
     private var priceTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
+    private var doneFlashTask: Task<Void, Never>?
 
     var armedCount: Int { alerts.filter(\.enabled).count }
 
@@ -186,7 +188,7 @@ final class AppViewModel: ObservableObject {
             alerts = (data.alerts ?? []).map { $0.asItem() }
             alertsDirty = false
             if let s = data.step, s > 0 { step = s }
-            showToast(data.message ?? "已生成", error: false)
+            flashDone()
         } catch {
             showToast(error.localizedDescription, error: true)
         }
@@ -214,7 +216,7 @@ final class AppViewModel: ObservableObject {
             )
             alerts = (data.alerts ?? []).map { $0.asItem() }
             alertsDirty = false
-            showToast("设置已保存，EA 下次同步时取回", error: false)
+            flashDone()
         } catch {
             showToast(error.localizedDescription, error: true)
         }
@@ -273,6 +275,17 @@ final class AppViewModel: ObservableObject {
         guard alerts.indices.contains(index) else { return }
         alerts[index].priceText = text
         alertsDirty = true
+    }
+
+    func flashDone() {
+        doneFlash = true
+        doneFlashTask?.cancel()
+        doneFlashTask = Task {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            if !Task.isCancelled {
+                doneFlash = false
+            }
+        }
     }
 
     func showToast(_ message: String, error: Bool) {

@@ -198,6 +198,11 @@ struct MainView: View {
             HStack {
                 Text("提醒价格")
                     .font(.headline)
+                if model.doneFlash {
+                    Text("  完成")
+                        .font(.caption)
+                        .foregroundStyle(.white)
+                }
                 Spacer()
                 Text("触发 \(model.armedCount) / \(model.alerts.count)")
                     .font(.caption)
