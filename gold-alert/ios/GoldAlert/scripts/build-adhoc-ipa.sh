@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 只出 Ad Hoc IPA（仍写入 D:\ota-site\goldalert，便于网页安装）。
+# 只出 Ad Hoc IPA（写入共享 D:\ota-site，专用文件名）。
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
 fi

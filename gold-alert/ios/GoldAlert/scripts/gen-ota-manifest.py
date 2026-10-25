@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Safari OTA manifest.plist + index.html for an Ad Hoc IPA (ota-site)."""
+"""Publish GOLD ALERT OTA files into a shared D:\\ota-site root without clobbering other apps."""
 
 from __future__ import annotations
 
@@ -10,6 +10,10 @@ import shutil
 import zipfile
 from pathlib import Path
 from xml.sax.saxutils import escape
+
+APP_SLUG = "goldalert"
+BEGIN = "<!-- GOLDALERT-OTA-BEGIN -->"
+END = "<!-- GOLDALERT-OTA-END -->"
 
 
 def read_bundle_info(ipa: Path) -> tuple[str, str, str]:
@@ -30,18 +34,87 @@ def read_bundle_info(ipa: Path) -> tuple[str, str, str]:
     return bid, ver, short
 
 
+def upsert_hub_index(out: Path, base: str, title: str, page_name: str, short: str, ver: str) -> None:
+    """Add/replace only the GOLDALERT marker block inside shared index.html."""
+    hub = out / "index.html"
+    link = f"{base.rstrip('/')}/{page_name}"
+    block = f"""{BEGIN}
+  <a class="app" href="{escape(page_name)}">
+    <strong>{escape(title)}</strong>
+    <span>v{escape(short)} (build {escape(ver)})</span>
+  </a>
+{END}
+"""
+    if hub.is_file():
+        text = hub.read_text(encoding="utf-8")
+        if BEGIN in text and END in text:
+            text = re.sub(
+                re.escape(BEGIN) + r".*?" + re.escape(END),
+                block.strip(),
+                text,
+                count=1,
+                flags=re.S,
+            )
+        else:
+            # Keep existing page; append our block before </body> when possible.
+            if "</body>" in text.lower():
+                # Case-sensitive replace of last </body>
+                idx = text.lower().rfind("</body>")
+                text = text[:idx] + "\n" + block + "\n" + text[idx:]
+            else:
+                text = text.rstrip() + "\n" + block + "\n"
+        hub.write_text(text, encoding="utf-8")
+        return
+
+    # No hub yet: create a minimal multi-app landing page.
+    hub.write_text(
+        f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>OTA 安装</title>
+<style>
+body {{ font-family: -apple-system, sans-serif; margin: 2rem; background:#0a0a0a; color:#f2f2f2; }}
+a.app {{ display:block; padding:14px 16px; margin:10px 0; border-radius:12px;
+  background:rgba(255,255,255,.06); color:#f2f2f2; text-decoration:none; }}
+a.app span {{ display:block; color:rgba(255,255,255,.45); font-size:13px; margin-top:4px; }}
+</style>
+</head>
+<body>
+<h1>安装应用</h1>
+<p>用 iPhone Safari 打开对应页面安装。</p>
+{block}
+</body>
+</html>
+""",
+        encoding="utf-8",
+    )
+    _ = link  # reserved for future absolute links
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ipa", required=True, type=Path)
     parser.add_argument(
         "--base-url",
         required=True,
-        help="HTTPS base for this app folder, e.g. https://w77.tail708c1b.ts.net/goldalert",
+        help="Shared HTTPS root, e.g. https://w77.tail708c1b.ts.net",
     )
     parser.add_argument("--title", default="GOLD ALERT")
-    parser.add_argument("--out-dir", required=True, type=Path)
+    parser.add_argument("--out-dir", required=True, type=Path, help="Usually D:\\ota-site")
     parser.add_argument("--ipa-name", default="GOLDALERT-adhoc.ipa")
+    parser.add_argument("--manifest-name", default=f"{APP_SLUG}-manifest.plist")
+    parser.add_argument("--page-name", default=f"{APP_SLUG}.html")
+    parser.add_argument("--icon-name", default=f"{APP_SLUG}-icon.png")
     parser.add_argument("--icon", type=Path, default=None)
+    parser.add_argument(
+        "--update-hub",
+        action="store_true",
+        default=True,
+        help="Upsert GOLD ALERT link into shared index.html (default on)",
+    )
+    parser.add_argument("--no-update-hub", action="store_false", dest="update_hub")
     args = parser.parse_args()
 
     ipa = args.ipa.resolve()
@@ -52,22 +125,23 @@ def main() -> None:
     out = args.out_dir.resolve()
     out.mkdir(parents=True, exist_ok=True)
 
+    # Unique names only — never write generic manifest.plist / icon.png / install.html.
     dest_ipa = out / args.ipa_name
     if ipa != dest_ipa:
         shutil.copy2(ipa, dest_ipa)
 
+    icon_path = out / args.icon_name
     if args.icon and args.icon.is_file():
-        shutil.copy2(args.icon, out / "icon.png")
+        shutil.copy2(args.icon, icon_path)
 
     base = args.base_url.rstrip("/")
     ipa_url = f"{base}/{args.ipa_name}"
-    manifest_url = f"{base}/manifest.plist"
-    icon_url = f"{base}/icon.png"
+    manifest_url = f"{base}/{args.manifest_name}"
+    icon_url = f"{base}/{args.icon_name}"
+    page_url = f"{base}/{args.page_name}"
 
-    assets = [
-        {"kind": "software-package", "url": ipa_url},
-    ]
-    if (out / "icon.png").is_file():
+    assets = [{"kind": "software-package", "url": ipa_url}]
+    if icon_path.is_file():
         assets.append({"kind": "display-image", "url": icon_url})
         assets.append({"kind": "full-size-image", "url": icon_url})
 
@@ -84,10 +158,11 @@ def main() -> None:
             }
         ]
     }
-    with (out / "manifest.plist").open("wb") as fh:
+    with (out / args.manifest_name).open("wb") as fh:
         plistlib.dump(manifest, fh)
 
     itms = f"itms-services://?action=download-manifest&url={manifest_url}"
+    has_icon = icon_path.is_file()
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -110,8 +185,7 @@ body {{
 }}
 .icon {{ width: 88px; height: 88px; border-radius: 20px; margin-bottom: 14px;
   box-shadow: 0 8px 24px rgba(0,0,0,.35); }}
-h1 {{ margin: 0 0 8px; font-size: 26px; letter-spacing: .04em;
-  color: #d4a017; }}
+h1 {{ margin: 0 0 8px; font-size: 26px; letter-spacing: .04em; color: #d4a017; }}
 .meta {{ color: rgba(255,255,255,.55); font-size: 14px; line-height: 1.5; margin: 0 0 22px; }}
 a.btn {{
   display: inline-block; width: 100%; box-sizing: border-box; padding: 14px 16px;
@@ -124,7 +198,7 @@ code {{ word-break: break-all; font-size: 11px; }}
 </head>
 <body>
   <div class="card">
-    {"<img class='icon' src='icon.png' alt=''/>" if (out / "icon.png").is_file() else ""}
+    {"<img class='icon' src='" + escape(args.icon_name) + "' alt=''/>" if has_icon else ""}
     <h1>{escape(args.title)}</h1>
     <p class="meta">版本 {escape(short)}（build {escape(ver)}）<br/>
     Bundle ID：<code>{escape(bid)}</code></p>
@@ -139,13 +213,17 @@ code {{ word-break: break-all; font-size: 11px; }}
 </body>
 </html>
 """
-    (out / "index.html").write_text(html, encoding="utf-8")
-    print(f"ota-site: {out}")
-    print(f"manifest: {out / 'manifest.plist'}")
-    print(f"index:    {out / 'index.html'}")
-    print(f"ipa:      {dest_ipa}")
-    print(f"install:  {base}/")
-    print(f"itms:     {itms}")
+    (out / args.page_name).write_text(html, encoding="utf-8")
+
+    if args.update_hub:
+        upsert_hub_index(out, base, args.title, args.page_name, short, ver)
+
+    print(f"ota-site:  {out}")
+    print(f"page:      {out / args.page_name}")
+    print(f"manifest:  {out / args.manifest_name}")
+    print(f"ipa:       {dest_ipa}")
+    print(f"install:   {page_url}")
+    print(f"itms:      {itms}")
 
 
 if __name__ == "__main__":

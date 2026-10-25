@@ -1,6 +1,6 @@
 @echo off
 setlocal EnableExtensions
-REM Build + Ad Hoc sign + publish to D:\ota-site\goldalert for Safari OTA.
+REM Build + Ad Hoc sign + publish into shared D:\ota-site root (unique goldalert-* names).
 REM Run from Windows; executes the WSL script.
 
 set "SCRIPT_DIR=%~dp0"

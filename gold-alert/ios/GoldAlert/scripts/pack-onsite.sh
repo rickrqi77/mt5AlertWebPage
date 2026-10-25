@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 拉代码 → xtool 编译 → zsign Ad Hoc 签名 → 写入 D:\ota-site\goldalert
-# Safari 打开 https://w77.tail708c1b.ts.net/goldalert/ 即可安装（与交通查询同样的网页安装方式）。
-# 只写 goldalert 子目录，不改动 D:\ota-site 下其它包的文件。
+# 拉代码 → xtool 编译 → zsign Ad Hoc 签名 → 写入共享 D:\ota-site 根目录
+# Safari: https://w77.tail708c1b.ts.net/goldalert.html
+# 只用 goldalert-* / GOLDALERT-* 文件名，不覆盖其它 app 的 install.html / manifest.plist。
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
 fi
@@ -11,11 +11,10 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ios_dir="$(cd "$script_dir/.." && pwd)"
 repo_dir="$(cd "$ios_dir/../.." && pwd)"
 
-# Windows D:\ota-site\goldalert  （WSL: /mnt/d/ota-site/goldalert）
-# ONSITE_DIR 仍可用（兼容旧名），优先 OTA_SITE_DIR。
-onsite_dir="${OTA_SITE_DIR:-${ONSITE_DIR:-/mnt/d/ota-site/goldalert}}"
+# Shared site root: Windows D:\ota-site  （WSL: /mnt/d/ota-site）
+ota_dir="${OTA_SITE_DIR:-${ONSITE_DIR:-/mnt/d/ota-site}}"
 adhoc_dir="${ADHOC_DIR:-/mnt/d/goldalert/adhoc}"
-base_url="${OTA_BASE_URL:-https://w77.tail708c1b.ts.net/goldalert}"
+base_url="${OTA_BASE_URL:-https://w77.tail708c1b.ts.net}"
 
 p12="$adhoc_dir/distribution.p12"
 profile="$adhoc_dir/goldalert-adhoc.mobileprovision"
@@ -24,6 +23,9 @@ signed_ipa="$adhoc_dir/GOLDALERT-adhoc.ipa"
 bundle_id="com.rickrqi77.goldalert"
 app_title="GOLD ALERT"
 ipa_name="GOLDALERT-adhoc.ipa"
+page_name="goldalert.html"
+manifest_name="goldalert-manifest.plist"
+icon_name="goldalert-icon.png"
 
 die() { echo "$1" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "缺少 $1。$2"; }
@@ -102,7 +104,7 @@ fi
 echo "未签名的包：$unsigned"
 
 echo "Ad Hoc 签名..."
-mkdir -p "$adhoc_dir" "$onsite_dir"
+mkdir -p "$adhoc_dir" "$ota_dir"
 merged_ents="$(mktemp --suffix=.entitlements)"
 profile_plist="$(mktemp --suffix=.plist)"
 trap 'rm -f "$build_log" "$merged_ents" "$profile_plist"' EXIT
@@ -117,7 +119,6 @@ ents = dict(profile.get("Entitlements") or {})
 with open(app_path, "rb") as fh:
     app = plistlib.load(fh)
 for key, value in app.items():
-    # Skip Xcode build-setting placeholders in template entitlements.
     if isinstance(value, str) and "$(AppIdentifierPrefix)" in value:
         continue
     if isinstance(value, list):
@@ -141,23 +142,26 @@ python3 "$script_dir/gen-ota-manifest.py" \
   --ipa "$signed_ipa" \
   --base-url "$base_url" \
   --title "$app_title" \
-  --out-dir "$onsite_dir" \
+  --out-dir "$ota_dir" \
   --ipa-name "$ipa_name" \
+  --manifest-name "$manifest_name" \
+  --page-name "$page_name" \
+  --icon-name "$icon_name" \
   --icon "$icon"
 
-# Also keep a copy next to certs for backup.
-cp -f "$onsite_dir/$ipa_name" "$signed_ipa" 2>/dev/null || true
+cp -f "$ota_dir/$ipa_name" "$signed_ipa" 2>/dev/null || true
 
 cat <<EOF
 
 完成。Safari 安装页：
-  $base_url/
+  $base_url/$page_name
 
-文件已写入：
-  $onsite_dir\\index.html
-  $onsite_dir\\manifest.plist
-  $onsite_dir\\$ipa_name
+写入 D:\\ota-site（专用文件名，不覆盖其它包）：
+  $page_name
+  $manifest_name
+  $ipa_name
+  $icon_name
+  index.html  （仅追加/更新 GOLD ALERT 链接区块）
 
-确认 Tailscale / 本机已把 https://w77.tail708c1b.ts.net 指到 D:\\ota-site（goldalert 为其子目录，不影响其它包）。
-iPhone 用 Safari 打开上面的地址，点「用 Safari 安装」。
+确认 https://w77.tail708c1b.ts.net 指向 D:\\ota-site。
 EOF
