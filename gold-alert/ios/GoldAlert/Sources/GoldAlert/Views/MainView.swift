@@ -95,20 +95,24 @@ struct MainView: View {
         .padding(.vertical, 8)
     }
 
-    /// Interval menu + 设定 — equal width, full row.
+    /// Interval menu + 设定 — equal width, full row (no chevron on the menu).
     private var stepAndAutoRow: some View {
         HStack(spacing: 8) {
-            Picker("间隔", selection: $model.step) {
+            Menu {
                 ForEach(AppViewModel.stepChoices, id: \.self) { value in
-                    Text(String(Int(value))).tag(value)
+                    Button(String(Int(value))) {
+                        model.step = value
+                    }
                 }
+            } label: {
+                Text(String(Int(model.step)))
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(Color.white.opacity(0.1))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            .pickerStyle(.menu)
-            .font(.headline)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background(Color.white.opacity(0.1))
-            .foregroundStyle(.white)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .buttonStyle(.plain)
 
             Button {
                 Task { await model.autoGenerate() }

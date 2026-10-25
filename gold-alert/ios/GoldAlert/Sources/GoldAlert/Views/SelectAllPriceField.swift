@@ -17,7 +17,7 @@ struct SelectAllPriceField: UIViewRepresentable {
         field.autocapitalizationType = .none
         field.borderStyle = .none
         field.textColor = .white
-        field.font = .monospacedDigitSystemFont(ofSize: 16, weight: .regular)
+        field.font = .monospacedDigitSystemFont(ofSize: 18, weight: .regular)
         field.tintColor = UIColor(red: 0.83, green: 0.63, blue: 0.09, alpha: 1)
         field.delegate = context.coordinator
         field.addTarget(context.coordinator, action: #selector(Coordinator.editingChanged(_:)), for: .editingChanged)

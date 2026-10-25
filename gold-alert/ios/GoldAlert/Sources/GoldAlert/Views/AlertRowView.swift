@@ -13,14 +13,15 @@ struct AlertRowView: View {
     private let swipeStepWidth: CGFloat = 28
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Text("\(index + 1).")
-                .font(.subheadline.monospacedDigit())
+                .font(.body.monospacedDigit())
                 .foregroundStyle(Color.white.opacity(0.45))
-                .frame(width: 36, alignment: .trailing)
+                .frame(width: 28, alignment: .leading)
                 .lineLimit(1)
-                .minimumScaleFactor(0.85)
+                .minimumScaleFactor(0.8)
                 .layoutPriority(1)
+                .padding(.leading, -4)
 
             SelectAllPriceField(text: $draft)
             .padding(.horizontal, 10)
