@@ -5,11 +5,12 @@ struct MainView: View {
     @State private var confirmClear = false
     @State private var confirmSaveEmpty = false
     @State private var showPollPicker = false
+    @State private var alertRowHeight: CGFloat = 48
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
                     header
                     priceHero
                     stepAndAutoRow
@@ -23,7 +24,7 @@ struct MainView: View {
                     .id("liquidationBottom")
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+                .padding(.vertical, 8)
                 .padding(.bottom, 20)
             }
         }
@@ -76,7 +77,7 @@ struct MainView: View {
     }
 
     private var priceHero: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 4) {
             HStack(spacing: 6) {
                 Text(model.quote.symbol.isEmpty ? "XAUUSD" : model.quote.symbol)
                     .font(.caption)
@@ -95,7 +96,7 @@ struct MainView: View {
                     showPollPicker = true
                 } label: {
                     Text(format(model.quote.price))
-                        .font(.system(size: 40, weight: .bold).monospacedDigit())
+                        .font(.system(size: 32, weight: .bold).monospacedDigit())
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                 }
@@ -125,7 +126,7 @@ struct MainView: View {
             }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
     }
 
     /// Interval menu + 设定 — equal width, full row (no chevron on the menu).
@@ -140,7 +141,7 @@ struct MainView: View {
             } label: {
                 Text(String(Int(model.step)))
                     .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 38)
                     .background(Color.white.opacity(0.1))
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -152,7 +153,7 @@ struct MainView: View {
             } label: {
                 Text("设定")
                     .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 38)
                     .background(Color(red: 0.23, green: 0.48, blue: 0.84))
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -173,7 +174,7 @@ struct MainView: View {
             } label: {
                 Text("保存")
                     .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 38)
                     .background(Color(red: 0.83, green: 0.63, blue: 0.09))
                     .foregroundStyle(.black)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -185,7 +186,7 @@ struct MainView: View {
             } label: {
                 Text("清除")
                     .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .frame(maxWidth: .infinity, minHeight: 38)
                     .background(Color(red: 0.75, green: 0.22, blue: 0.17))
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -218,20 +219,51 @@ struct MainView: View {
                     .padding(.vertical, 16)
                     .frame(maxWidth: .infinity)
             } else {
-                ForEach(Array(model.alerts.enumerated()), id: \.element.localID) { index, item in
-                    AlertRowView(
-                        index: index,
-                        item: item,
-                        onPriceChange: { model.updatePrice(at: index, text: $0) },
-                        onToggleArm: { model.toggleArm(at: index) },
-                        onDelete: { model.deleteAlert(at: index) }
-                    )
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(alignment: .leading, spacing: Self.alertRowSpacing) {
+                        ForEach(Array(model.alerts.enumerated()), id: \.element.localID) { index, item in
+                            AlertRowView(
+                                index: index,
+                                item: item,
+                                onPriceChange: { model.updatePrice(at: index, text: $0) },
+                                onToggleArm: { model.toggleArm(at: index) },
+                                onDelete: { model.deleteAlert(at: index) }
+                            )
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: AlertRowHeightKey.self,
+                                        value: geo.size.height
+                                    )
+                                }
+                            )
+                        }
+                    }
                 }
+                .frame(height: visibleRowsHeight)
+                .onPreferenceChange(AlertRowHeightKey.self) { alertRowHeight = $0 }
             }
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
     }
+
+    /// Height of the alert rows region, capped so exactly 9 rows show; extras scroll inside.
+    private var visibleRowsHeight: CGFloat {
+        let n = min(model.alerts.count, 9)
+        guard n > 0 else { return 0 }
+        return CGFloat(n) * alertRowHeight + CGFloat(n - 1) * Self.alertRowSpacing
+    }
+
+    /// Measures the real height of one AlertRowView so the 9-row box stays exact.
+    private struct AlertRowHeightKey: PreferenceKey {
+        static var defaultValue: CGFloat = 48
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+            value = nextValue()
+        }
+    }
+
+    private static let alertRowSpacing: CGFloat = 10
 
     private func format(_ value: Double) -> String {
         guard value > 0 else { return "--" }
