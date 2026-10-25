@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 只出 Ad Hoc IPA（写入 D:\ota-site，安装合并进 index.html）。
+# 只出 Ad Hoc IPA（写入 D:\ota-site，刷新与其它 App 相同的 index）。
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
 fi

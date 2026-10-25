@@ -31,7 +31,7 @@ xtool setup
 
 ## 网页安装（推荐，与交通查询相同）
 
-打包到共享 **`D:\ota-site`**（与其它 App 同一层；安装入口合并进 `index.html`），Safari 打开：
+打包到共享 **`D:\ota-site`**，安装页与其它 App **同一套 `index.html` 样式**，Safari 打开：
 
 **https://w77.tail708c1b.ts.net/**
 
@@ -40,7 +40,8 @@ cd gold-alert/ios/GoldAlert
 ./scripts/pack-onsite.sh
 ```
 
-Windows：`scripts\pack-onsite.bat`
+Windows：`scripts\pack-onsite.bat`  
+只刷新列表：`./scripts/scan-ota-site.sh`
 
 证书放 `D:\goldalert\adhoc`。见 [ADHOC.md](ADHOC.md)。
 

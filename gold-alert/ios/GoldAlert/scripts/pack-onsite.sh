@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 拉代码 → xtool 编译 → zsign Ad Hoc 签名 → 写入共享 D:\ota-site（与其它 app 同一层）
-# 安装入口合并进 index.html：https://w77.tail708c1b.ts.net/
-# 只用 GOLDALERT-*/goldalert-* 文件名；index.html 仅更新标记区块，不整页覆盖。
+# 拉代码 → xtool 编译 → zsign Ad Hoc → 写入共享 D:\ota-site
+# 与黄金报价 / 交通查询同一套 index.html（apps.json + scan-all）。
+# Safari: https://w77.tail708c1b.ts.net/
 if [ -z "${BASH_VERSION:-}" ]; then
   exec /usr/bin/env bash "$0" "$@"
 fi
@@ -20,10 +20,8 @@ profile="$adhoc_dir/goldalert-adhoc.mobileprovision"
 pass_file="$adhoc_dir/p12.pass"
 signed_ipa="$adhoc_dir/GOLDALERT-adhoc.ipa"
 bundle_id="com.rickrqi77.goldalert"
-app_title="GOLD ALERT"
-ipa_name="GOLDALERT-adhoc.ipa"
-manifest_name="goldalert-manifest.plist"
-icon_name="goldalert-icon.png"
+app_title="${OTA_TITLE:-GOLD ALERT}"
+ota_slug="${OTA_SLUG:-goldalert}"
 
 die() { echo "$1" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "缺少 $1。$2"; }
@@ -135,29 +133,23 @@ PY
 zsign -f -k "$p12" -p "$password" -m "$profile" -e "$merged_ents" -o "$signed_ipa" "$unsigned"
 [[ -f "$signed_ipa" ]] || die "签名失败"
 
-icon="$ios_dir/Icon.png"
+echo "发布到 OTA 站（与其它 App 同一 index）..."
+cp -f "$signed_ipa" "$ota_dir/"
 python3 "$script_dir/gen-ota-manifest.py" \
-  --ipa "$signed_ipa" \
+  --ipa "$ota_dir/$(basename "$signed_ipa")" \
   --base-url "$base_url" \
   --title "$app_title" \
-  --out-dir "$ota_dir" \
-  --ipa-name "$ipa_name" \
-  --manifest-name "$manifest_name" \
-  --icon-name "$icon_name" \
-  --icon "$icon"
-
-cp -f "$ota_dir/$ipa_name" "$signed_ipa" 2>/dev/null || true
+  --slug "$ota_slug" \
+  --out-dir "$ota_dir"
 
 cat <<EOF
 
-完成。Safari 打开总安装页：
-  $base_url/
+完成。Safari 打开（与其它 App 同一安装页）：
+  ${base_url%/}/
 
-同一层写入（专用文件名，不覆盖其它包）：
-  index.html                 ← 合并进 GOLD ALERT 安装按钮
-  $manifest_name
-  $ipa_name
-  $icon_name
-
-确认 https://w77.tail708c1b.ts.net 指向 D:\\ota-site。
+写入：
+  $ota_dir/$(basename "$signed_ipa")
+  $ota_dir/manifest-${ota_slug}.plist
+  $ota_dir/index.html   （列出目录内全部 .ipa）
+  $ota_dir/apps.json
 EOF

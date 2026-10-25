@@ -1,8 +1,6 @@
 @echo off
 setlocal EnableExtensions
-REM Build + Ad Hoc sign + merge install into D:\ota-site\index.html (unique goldalert-* files).
-
-REM Run from Windows; executes the WSL script.
+REM Build + Ad Hoc sign + publish into shared D:\ota-site (same index UI as other apps).
 
 set "SCRIPT_DIR=%~dp0"
 for %%I in ("%SCRIPT_DIR%..") do set "IOS_WIN=%%~fI"
@@ -14,5 +12,5 @@ if errorlevel 1 (
   exit /b 1
 )
 
-wsl -e bash -lc "cd \"$(wslpath -a '%IOS_WIN%')\" && chmod +x scripts/pack-onsite.sh scripts/gen-ota-manifest.py && ./scripts/pack-onsite.sh"
+wsl -e bash -lc "cd \"$(wslpath -a '%IOS_WIN%')\" && chmod +x scripts/pack-onsite.sh scripts/gen-ota-manifest.py scripts/scan-ota-site.sh && ./scripts/pack-onsite.sh"
 exit /b %ERRORLEVEL%
