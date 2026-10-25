@@ -21,20 +21,6 @@ struct LiquidationView: View {
                 onResultReady?()
             }
         }
-        .confirmationDialog(
-            "是否删除这张截图？",
-            isPresented: $model.showDeleteConfirm,
-            titleVisibility: .visible
-        ) {
-            Button("删除", role: .destructive) {
-                Task { await model.deleteLastScreenshot() }
-            }
-            Button("保留", role: .cancel) {
-                model.keepScreenshot()
-            }
-        } message: {
-            Text("计算已完成。删除后相册里这张截图会移入「最近删除」。")
-        }
     }
 
     private var headerRow: some View {

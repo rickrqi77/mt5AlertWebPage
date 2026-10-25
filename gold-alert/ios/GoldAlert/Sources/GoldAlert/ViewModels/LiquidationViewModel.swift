@@ -11,7 +11,6 @@ final class LiquidationViewModel: ObservableObject {
     @Published var errorText: String?
     @Published var result: LiquidationResult?
     @Published var debugOCR: String = ""
-    @Published var showDeleteConfirm = false
     @Published var lastAssetLocalID: String?
 
     private var lastAsset: PHAsset?
@@ -69,27 +68,17 @@ final class LiquidationViewModel: ObservableObject {
                 calculated = try LiquidationCalculator.calculateUSD(data: data)
             }
             result = calculated
-            showDeleteConfirm = true
+
+            // No prompt — delete the used screenshot immediately after success.
+            do {
+                try await PhotoLibraryService.deleteAsset(asset)
+                lastAsset = nil
+                lastAssetLocalID = nil
+            } catch {
+                errorText = "计算成功，但删除截图失败：\(error.localizedDescription)"
+            }
         } catch {
             errorText = error.localizedDescription
         }
-    }
-
-    func deleteLastScreenshot() async {
-        guard let asset = lastAsset else { return }
-        busy = true
-        defer { busy = false }
-        do {
-            try await PhotoLibraryService.deleteAsset(asset)
-            lastAsset = nil
-            lastAssetLocalID = nil
-            showDeleteConfirm = false
-        } catch {
-            errorText = "删除失败：\(error.localizedDescription)"
-        }
-    }
-
-    func keepScreenshot() {
-        showDeleteConfirm = false
     }
 }
