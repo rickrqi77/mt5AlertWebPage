@@ -9,23 +9,33 @@ struct MainView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 8) {
-                    header
-                    priceHero
-                    stepAndAutoRow
-                    saveAndClearRow
-                    alertsPanel
+            GeometryReader { geo in
+                ScrollView {
+                    // 第 1 屏：顶部 + 提醒价格（恰好 9 行）。底部用弹性留白填满整屏，
+                    // 让“最终价”区域完全落在第 2 屏，首屏不露出。
+                    VStack(alignment: .leading, spacing: 8) {
+                        header
+                        priceHero
+                        stepAndAutoRow
+                        saveAndClearRow
+                        alertsPanel
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
+
+                    // 第 2 屏：最终价
                     LiquidationView {
                         withAnimation(.easeInOut(duration: 0.35)) {
                             proxy.scrollTo("liquidationBottom", anchor: .bottom)
                         }
                     }
+                    .frame(minHeight: geo.size.height)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 20)
                     .id("liquidationBottom")
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .padding(.bottom, 20)
             }
         }
         .confirmationDialog("确定清除全部提醒？", isPresented: $confirmClear, titleVisibility: .visible) {
@@ -252,10 +262,8 @@ struct MainView: View {
     private var visibleRowsHeight: CGFloat {
         let n = min(model.alerts.count, 9)
         guard n > 0 else { return 0 }
-        let h = CGFloat(n) * alertRowHeight + CGFloat(n - 1) * Self.alertRowSpacing
-        // With more than 9 alerts, shave a small margin so the 10th row stays fully
-        // below the visible region (row 9 only loses bottom padding, which is invisible).
-        return model.alerts.count > 9 ? h - 8 : h
+        // +2pt 安全余量：保证第 9 行完整显示（不会被裁掉一点）；第 10 行仍在间距之下，不露出。
+        return CGFloat(n) * alertRowHeight + CGFloat(n - 1) * Self.alertRowSpacing + 2
     }
 
     /// Measures the real height of one AlertRowView so the 9-row box stays exact.
