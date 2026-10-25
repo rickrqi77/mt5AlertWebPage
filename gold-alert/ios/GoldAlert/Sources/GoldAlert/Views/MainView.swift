@@ -23,17 +23,17 @@ struct MainView: View {
                             Spacer(minLength: 0)
                         }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .frame(maxWidth: .infinity, minHeight: geo.size.height + 16, alignment: .top)
+                        .padding(.top, 8)
+                        .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
 
-                        // 第 2 屏：最终价（紧贴第 2 屏顶部）
+                        // 第 2 屏：最终价（紧贴提醒面板下方）
                         LiquidationView {
                             withAnimation(.easeInOut(duration: 0.35)) {
                                 proxy.scrollTo("liquidationBottom", anchor: .bottom)
                             }
                         }
                         .padding(.horizontal, 16)
-                        .padding(.top, 8)
+                        .padding(.top, 4)
                         .padding(.bottom, 20)
                         .id("liquidationBottom")
                     }
