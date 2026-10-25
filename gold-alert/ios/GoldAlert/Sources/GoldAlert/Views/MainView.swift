@@ -257,7 +257,7 @@ struct MainView: View {
 
     /// Measures the real height of one AlertRowView so the 9-row box stays exact.
     private struct AlertRowHeightKey: PreferenceKey {
-        static var defaultValue: CGFloat = 48
+        static let defaultValue: CGFloat = 48
         static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
             value = nextValue()
         }
