@@ -14,23 +14,19 @@ struct RootView: View {
             }
 
             if let toast = model.toast {
-                VStack {
-                    Spacer()
-                    Text(toast)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(model.toastIsError
-                                      ? Color(red: 0.75, green: 0.22, blue: 0.17)
-                                      : Color(red: 0.45, green: 0.45, blue: 0.45))
-                        )
-                        .padding(.bottom, 28)
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-                .animation(.easeInOut(duration: 0.2), value: model.toast)
+                Text(toast)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(model.toastIsError
+                                  ? Color(red: 0.75, green: 0.22, blue: 0.17)
+                                  : Color.black)
+                    )
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.2), value: model.toast)
             }
         }
         .onAppear { model.onAppear() }
