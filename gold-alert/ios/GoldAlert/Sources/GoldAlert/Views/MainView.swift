@@ -74,21 +74,47 @@ struct MainView: View {
     }
 
     private var priceHero: some View {
-        VStack(spacing: 4) {
-            Text(model.quote.symbol.isEmpty ? "XAUUSD" : model.quote.symbol)
-                .font(.caption)
-                .tracking(2)
-                .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09).opacity(0.85))
-            Text(format(model.quote.price))
-                .font(.system(size: 40, weight: .bold).monospacedDigit())
-                .foregroundStyle(.white)
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Text(model.quote.symbol.isEmpty ? "XAUUSD" : model.quote.symbol)
+                    .font(.caption)
+                    .tracking(2)
+                    .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09).opacity(0.85))
+                Circle()
+                    .fill(model.eaOnline
+                          ? Color(red: 0.3, green: 0.75, blue: 0.45)
+                          : Color(red: 0.9, green: 0.3, blue: 0.28))
+                    .frame(width: 8, height: 8)
+                    .accessibilityLabel(model.eaOnline ? "EA 在线" : "EA 离线")
+            }
 
-            Text(model.eaOnline ? "EA 在线" : "EA 离线")
-                .font(.caption2)
-                .foregroundStyle(model.eaOnline
-                                 ? Color(red: 0.3, green: 0.75, blue: 0.45)
-                                 : Color.white.opacity(0.35))
-                .padding(.top, 4)
+            ZStack {
+                Text(format(model.quote.price))
+                    .font(.system(size: 40, weight: .bold).monospacedDigit())
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+
+                HStack {
+                    Spacer(minLength: 0)
+                    Button {
+                        Task { await model.togglePause() }
+                    } label: {
+                        Text(model.alertsPaused ? "恢复" : "暂停")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(
+                                Capsule().fill(
+                                    model.alertsPaused
+                                    ? Color(red: 0.18, green: 0.55, blue: 0.34)
+                                    : Color.white.opacity(0.12)
+                                )
+                            )
+                            .foregroundStyle(.white)
+                    }
+                    .disabled(model.busy)
+                }
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
@@ -192,25 +218,6 @@ struct MainView: View {
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
-    }
-
-    private var pauseButton: some View {
-        Button {
-            Task { await model.togglePause() }
-        } label: {
-            Text(model.alertsPaused ? "恢复提醒" : "暂停提醒")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(model.alertsPaused
-                              ? Color(red: 0.18, green: 0.55, blue: 0.34)
-                              : Color.white.opacity(0.1))
-                )
-                .foregroundStyle(.white)
-        }
-        .disabled(model.busy)
     }
 
     private func format(_ value: Double) -> String {
