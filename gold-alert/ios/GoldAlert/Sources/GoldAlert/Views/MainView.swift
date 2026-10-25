@@ -7,18 +7,25 @@ struct MainView: View {
     @State private var showPollPicker = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                header
-                priceHero
-                stepAndAutoRow
-                saveAndClearRow
-                alertsPanel
-                LiquidationView()
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    header
+                    priceHero
+                    stepAndAutoRow
+                    saveAndClearRow
+                    alertsPanel
+                    LiquidationView {
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            proxy.scrollTo("liquidationBottom", anchor: .bottom)
+                        }
+                    }
+                    .id("liquidationBottom")
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .padding(.bottom, 20)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .padding(.bottom, 20)
         }
         .confirmationDialog("确定清除全部提醒？", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("清除", role: .destructive) {

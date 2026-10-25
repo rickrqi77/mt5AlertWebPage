@@ -2,6 +2,8 @@ import SwiftUI
 
 struct LiquidationView: View {
     @StateObject private var model = LiquidationViewModel()
+    /// Called after a successful screenshot calculation (result available).
+    var onResultReady: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -12,6 +14,13 @@ struct LiquidationView: View {
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
         .contentShape(Rectangle())
         .simultaneousGesture(modeSwipeGesture)
+        .onChange(of: model.result?.liquidationPrice) { _, newValue in
+            guard newValue != nil else { return }
+            // Wait a beat so the result card is laid out, then ask parent to scroll.
+            DispatchQueue.main.async {
+                onResultReady?()
+            }
+        }
         .confirmationDialog(
             "是否删除这张截图？",
             isPresented: $model.showDeleteConfirm,
@@ -29,17 +38,14 @@ struct LiquidationView: View {
     }
 
     private var headerRow: some View {
-        ZStack {
+        HStack {
+            Text("最终价")
+                .font(.headline)
+                .foregroundStyle(.white)
+            Spacer(minLength: 0)
             Text(model.mode.rawValue)
                 .font(.headline)
                 .foregroundStyle(Color.white.opacity(0.55))
-
-            HStack {
-                Text("最终价")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                Spacer(minLength: 0)
-            }
         }
     }
 
