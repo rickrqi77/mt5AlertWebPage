@@ -10,6 +10,7 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 priceHero
+                LiquidationView()
                 stepPanel
                 actionRow
                 alertsPanel

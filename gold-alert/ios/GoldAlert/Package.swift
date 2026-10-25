@@ -6,7 +6,6 @@ let package = Package(
     name: "GoldAlert",
     platforms: [
         .iOS(.v17),
-        .macOS(.v14),
     ],
     products: [
         // xtool expects exactly one library product = the main app.

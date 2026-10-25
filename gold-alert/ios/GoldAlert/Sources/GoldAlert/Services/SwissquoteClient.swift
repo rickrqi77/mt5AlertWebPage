@@ -14,30 +14,48 @@ actor SwissquoteClient {
     }
 
     func fetchQuote() async throws -> Quote {
+        try await fetchQuote(
+            url: url,
+            symbol: "XAUUSD",
+            errorMessage: "Swissquote 黄金报价暂时取不到"
+        )
+    }
+
+    /// Mid price of USD/JPY from Swissquote public BBO.
+    func fetchUSDJPY() async throws -> Double {
+        let quote = try await fetchQuote(
+            url: URL(string: "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/USD/JPY")!,
+            symbol: "USDJPY",
+            errorMessage: "Swissquote USD/JPY 暂时取不到"
+        )
+        return quote.price
+    }
+
+    private func fetchQuote(url: URL, symbol: String, errorMessage: String) async throws -> Quote {
         var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 12
 
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw AppError.message("Swissquote 报价暂时取不到")
+            throw AppError.message(errorMessage)
         }
 
         let rows = try JSONDecoder().decode([SwissRow].self, from: data)
-        guard let picked = Self.pickQuote(from: rows) else {
-            throw AppError.message("Swissquote 报价暂时取不到")
+        guard let picked = Self.pickQuote(from: rows, symbol: symbol) else {
+            throw AppError.message(errorMessage)
         }
         return picked
     }
 
-    private static func pickQuote(from rows: [SwissRow]) -> Quote? {
+    private static func pickQuote(from rows: [SwissRow], symbol: String) -> Quote? {
         var fallback: Quote?
         for row in rows {
             for profile in row.spreadProfilePrices ?? [] {
                 guard let bid = profile.bid, let ask = profile.ask,
                       bid > 0, ask > 0, ask >= bid else { continue }
                 let quote = Quote(
-                    symbol: "XAUUSD",
+                    symbol: symbol,
                     bid: roundPrice(bid),
                     ask: roundPrice(ask),
                     price: roundPrice((bid + ask) / 2),

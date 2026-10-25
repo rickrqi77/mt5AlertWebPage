@@ -8,6 +8,7 @@
 - **Swissquote** 直连取 XAU/USD（`forex-data-feed.swissquote.com`），不走网页
 - 取到报价后由 App 调用 `POST /api/app/price` 上传 Cloudflare（不标记 EA 在线）
 - 设定 / 保存 / 清除 / 暂停：与网页同一套 Cloudflare API，EA 下次 `/api/ea/sync` 读到
+- **爆仓价（日元模式）**：读取相册最新截图 → OCR 只解析 GOLD 持仓 → 显示平均价 / 手数 / 爆仓价，并可删除截图
 
 ## 一次性：安装 xtool（Linux / Windows）
 
@@ -64,6 +65,19 @@ xtool dev build --ipa
 | `Sources/GoldAlert/` | 原生 SwiftUI 源码 |
 
 默认 API：`https://alertdata.pages.dev`（解锁页可改）。Worker 需已部署含 `POST /api/app/price` 的版本。
+
+## 爆仓价 · 日元模式
+
+1. 点「读取图片」→ 取相册 **截图** 相册最新一张（没有则取最近图片）
+2. Vision OCR，**只处理名称含 GOLD / XAU 的持仓**，忽略其它品种
+3. 均价 = Σ(入场价 × 手数) / Σ手数  
+4. 日元可用 = 结余 − 预付款 × 0.2  
+5. 美元可用 = 日元可用 ÷ Swissquote **USD/JPY** 中间价  
+6. 可承受点数 = 美元可用 ÷ (总手数 × 100)  
+7. sell：爆仓价 = 均价 + 点数；buy：爆仓价 = 均价 − 点数  
+8. 算出后询问是否删除该截图  
+
+美元模式公式尚未接入（界面可选，按钮暂禁用）。
 
 ## 与网页 / EA 的关系
 
