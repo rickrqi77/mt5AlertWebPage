@@ -249,7 +249,6 @@ final class AppViewModel: ObservableObject {
                 paused: !alertsPaused
             )
             alertsPaused = data.paused ?? !alertsPaused
-            showToast(data.message ?? (alertsPaused ? "提醒已暂停" : "提醒已恢复"), error: false)
         } catch {
             showToast(error.localizedDescription, error: true)
         }

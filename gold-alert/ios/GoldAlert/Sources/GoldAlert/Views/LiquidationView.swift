@@ -61,7 +61,7 @@ struct LiquidationView: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 12)
-                    .background(Color(red: 0.45, green: 0.32, blue: 0.75))
+                    .background(Color(red: 0.23, green: 0.48, blue: 0.84))
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }

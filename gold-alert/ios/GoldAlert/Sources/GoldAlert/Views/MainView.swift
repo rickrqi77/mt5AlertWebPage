@@ -12,7 +12,8 @@ struct MainView: View {
                 header
                 priceHero
                 LiquidationView()
-                controlsRow
+                stepAndAutoRow
+                saveAndClearRow
                 alertsPanel
                 pauseButton
                 footer
@@ -56,8 +57,8 @@ struct MainView: View {
                 showPollPicker = true
             } label: {
                 HStack(spacing: 10) {
-                    Image(systemName: "bitcoinsign.circle.fill")
-                        .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+                    Image(systemName: "bell.badge.fill")
+                        .foregroundStyle(Color(red: 0.9, green: 0.25, blue: 0.22))
                     Text("提醒事项")
                         .font(.system(size: 18, weight: .bold))
                         .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
@@ -94,9 +95,9 @@ struct MainView: View {
         .padding(.vertical, 8)
     }
 
-    /// One menu + three action buttons: equal width/height, no outer card.
-    private var controlsRow: some View {
-        HStack(spacing: 6) {
+    /// Interval menu + 设定 — equal width, full row.
+    private var stepAndAutoRow: some View {
+        HStack(spacing: 8) {
             Picker("间隔", selection: $model.step) {
                 ForEach(AppViewModel.stepChoices, id: \.self) { value in
                     Text(String(Int(value))).tag(value)
@@ -120,18 +121,12 @@ struct MainView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             .disabled(model.busy)
+        }
+    }
 
-            Button {
-                confirmClear = true
-            } label: {
-                Text("全部清除")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(Color(red: 0.75, green: 0.22, blue: 0.17))
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-
+    /// 保存 then 清除 — equal width, full row.
+    private var saveAndClearRow: some View {
+        HStack(spacing: 8) {
             Button {
                 if !model.alerts.isEmpty && model.armedCount == 0 {
                     confirmSaveEmpty = true
@@ -139,7 +134,7 @@ struct MainView: View {
                     Task { await model.saveAlerts() }
                 }
             } label: {
-                Text("保存设置")
+                Text("保存")
                     .font(.headline)
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .background(Color(red: 0.83, green: 0.63, blue: 0.09))
@@ -147,6 +142,17 @@ struct MainView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
             .disabled(model.busy)
+
+            Button {
+                confirmClear = true
+            } label: {
+                Text("清除")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(Color(red: 0.75, green: 0.22, blue: 0.17))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
         }
     }
 

@@ -8,9 +8,9 @@ struct AuthView: View {
         VStack(spacing: 16) {
             Spacer(minLength: 40)
 
-            Image(systemName: "bitcoinsign.circle.fill")
+            Image(systemName: "bell.badge.fill")
                 .font(.system(size: 72))
-                .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+                .foregroundStyle(Color(red: 0.9, green: 0.25, blue: 0.22))
 
             Text("提醒事项")
                 .font(.system(size: 28, weight: .bold))
