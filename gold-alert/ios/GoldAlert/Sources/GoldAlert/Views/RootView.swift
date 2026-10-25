@@ -25,7 +25,7 @@ struct RootView: View {
                             RoundedRectangle(cornerRadius: 12)
                                 .fill(model.toastIsError
                                       ? Color(red: 0.75, green: 0.22, blue: 0.17)
-                                      : Color(red: 0.18, green: 0.55, blue: 0.34))
+                                      : Color(red: 0.45, green: 0.45, blue: 0.45))
                         )
                         .padding(.bottom, 28)
                 }

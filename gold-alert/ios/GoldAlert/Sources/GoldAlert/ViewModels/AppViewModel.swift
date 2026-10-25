@@ -280,7 +280,7 @@ final class AppViewModel: ObservableObject {
         toastIsError = error
         toastTask?.cancel()
         toastTask = Task {
-            try? await Task.sleep(nanoseconds: 2_800_000_000)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
             if !Task.isCancelled {
                 toast = nil
             }

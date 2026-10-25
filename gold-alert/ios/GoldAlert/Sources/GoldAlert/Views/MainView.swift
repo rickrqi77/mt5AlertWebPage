@@ -207,7 +207,7 @@ struct MainView: View {
             }
 
             if model.alerts.isEmpty {
-                Text("暂无提醒，点「设定」生成后选择要触发的价格")
+                Text("暂无提醒")
                     .font(.subheadline)
                     .foregroundStyle(Color.white.opacity(0.4))
                     .padding(.vertical, 16)
