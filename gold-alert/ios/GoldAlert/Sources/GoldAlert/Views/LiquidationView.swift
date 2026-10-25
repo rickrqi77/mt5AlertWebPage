@@ -6,22 +6,7 @@ struct LiquidationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    collapsed.toggle()
-                }
-            } label: {
-                HStack {
-                    Text("最终价")
-                        .font(.headline)
-                        .foregroundStyle(.white)
-                    Spacer()
-                    Image(systemName: collapsed ? "chevron.down" : "chevron.up")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.white.opacity(0.55))
-                }
-            }
-            .buttonStyle(.plain)
+            headerRow
 
             if !collapsed {
                 expandedBody
@@ -29,6 +14,8 @@ struct LiquidationView: View {
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
+        .contentShape(Rectangle())
+        .simultaneousGesture(modeSwipeGesture)
         .confirmationDialog(
             "是否删除这张截图？",
             isPresented: $model.showDeleteConfirm,
@@ -45,17 +32,30 @@ struct LiquidationView: View {
         }
     }
 
+    private var headerRow: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                collapsed.toggle()
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Text("最终价")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                Text(model.mode.rawValue)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.white.opacity(0.55))
+                Spacer()
+                Image(systemName: collapsed ? "chevron.down" : "chevron.up")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.white.opacity(0.55))
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     private var expandedBody: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Picker("模式", selection: $model.mode) {
-                ForEach(LiquidationMode.allCases) { mode in
-                    Text(mode.rawValue).tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .controlSize(.large)
-            .frame(minHeight: 48)
-
             Button {
                 Task { await model.readLatestScreenshotAndCalculate() }
             } label: {
@@ -79,6 +79,24 @@ struct LiquidationView: View {
                 resultCard(r)
             }
         }
+    }
+
+    /// Horizontal swipe switches 日元模式 ↔ 美元模式.
+    private var modeSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 24, coordinateSpace: .local)
+            .onEnded { value in
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                guard abs(value.translation.width) > 40 else { return }
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    if value.translation.width < 0 {
+                        // left → 美元
+                        model.setMode(.usd)
+                    } else {
+                        // right → 日元
+                        model.setMode(.jpy)
+                    }
+                }
+            }
     }
 
     private func resultCard(_ r: LiquidationResult) -> some View {
