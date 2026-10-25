@@ -5,36 +5,38 @@ struct MainView: View {
     @State private var confirmClear = false
     @State private var confirmSaveEmpty = false
     @State private var showPollPicker = false
-    @State private var alertRowHeight: CGFloat = 48
+    @State private var alertRowPitch: CGFloat = 52
 
     var body: some View {
         ScrollViewReader { proxy in
             GeometryReader { geo in
                 ScrollView {
-                    // 第 1 屏：顶部 + 提醒价格（恰好 9 行）。底部用弹性留白填满整屏，
-                    // 让“最终价”区域完全落在第 2 屏，首屏不露出。
-                    VStack(alignment: .leading, spacing: 8) {
-                        header
-                        priceHero
-                        stepAndAutoRow
-                        saveAndClearRow
-                        alertsPanel
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
-
-                    // 第 2 屏：最终价
-                    LiquidationView {
-                        withAnimation(.easeInOut(duration: 0.35)) {
-                            proxy.scrollTo("liquidationBottom", anchor: .bottom)
+                    VStack(alignment: .leading, spacing: 0) {
+                        // 第 1 屏：顶部 + 提醒价格（恰好 9 行）。底部用弹性留白填满整屏，
+                        // 让“最终价”区域完全落在第 2 屏，首屏不露出。
+                        VStack(alignment: .leading, spacing: 8) {
+                            header
+                            priceHero
+                            stepAndAutoRow
+                            saveAndClearRow
+                            alertsPanel
+                            Spacer(minLength: 0)
                         }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, minHeight: geo.size.height + 16, alignment: .top)
+
+                        // 第 2 屏：最终价（紧贴第 2 屏顶部）
+                        LiquidationView {
+                            withAnimation(.easeInOut(duration: 0.35)) {
+                                proxy.scrollTo("liquidationBottom", anchor: .bottom)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.top, 8)
+                        .padding(.bottom, 20)
+                        .id("liquidationBottom")
                     }
-                    .frame(minHeight: geo.size.height)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 20)
-                    .id("liquidationBottom")
                 }
             }
         }
@@ -242,16 +244,21 @@ struct MainView: View {
                             .background(
                                 GeometryReader { geo in
                                     Color.clear.preference(
-                                        key: AlertRowHeightKey.self,
-                                        value: geo.size.height
+                                        key: RowOriginsKey.self,
+                                        value: [index: geo.frame(in: .named("alertRows")).minY]
                                     )
                                 }
                             )
                         }
                     }
                 }
+                .coordinateSpace(name: "alertRows")
                 .frame(height: visibleRowsHeight)
-                .onPreferenceChange(AlertRowHeightKey.self) { alertRowHeight = $0 }
+                .onPreferenceChange(RowOriginsKey.self) { origins in
+                    if let y0 = origins[0], let y1 = origins[1], y1 > y0 {
+                        alertRowPitch = y1 - y0
+                    }
+                }
             }
         }
         .padding(14)
@@ -259,18 +266,18 @@ struct MainView: View {
     }
 
     /// Height of the alert rows region, capped so exactly 9 rows show; extras scroll inside.
+    /// n 行内容高度 = n × 行间距(pitch) − 1 个间距（由前两行原点实测，精确到像素）。
     private var visibleRowsHeight: CGFloat {
         let n = min(model.alerts.count, 9)
         guard n > 0 else { return 0 }
-        // +2pt 安全余量：保证第 9 行完整显示（不会被裁掉一点）；第 10 行仍在间距之下，不露出。
-        return CGFloat(n) * alertRowHeight + CGFloat(n - 1) * Self.alertRowSpacing + 2
+        return CGFloat(n) * alertRowPitch - Self.alertRowSpacing
     }
 
-    /// Measures the real height of one AlertRowView so the 9-row box stays exact.
-    private struct AlertRowHeightKey: PreferenceKey {
-        static let defaultValue: CGFloat = 42
-        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-            value = nextValue()
+    /// 收集每行在滚动区坐标系中的顶部 Y，用于实测相邻两行的行间距。
+    private struct RowOriginsKey: PreferenceKey {
+        static let defaultValue: [Int: CGFloat] = [:]
+        static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+            value.merge(nextValue()) { _, new in new }
         }
     }
 
