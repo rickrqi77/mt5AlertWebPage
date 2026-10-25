@@ -4,7 +4,9 @@ import SwiftUI
 
 @MainActor
 final class LiquidationViewModel: ObservableObject {
-    @Published var mode: LiquidationMode = .jpy
+    private static let modeKey = "liquidationMode"
+
+    @Published var mode: LiquidationMode
     @Published var busy = false
     @Published var errorText: String?
     @Published var result: LiquidationResult?
@@ -13,6 +15,28 @@ final class LiquidationViewModel: ObservableObject {
     @Published var lastAssetLocalID: String?
 
     private var lastAsset: PHAsset?
+
+    init() {
+        if let raw = UserDefaults.standard.string(forKey: Self.modeKey),
+           let saved = LiquidationMode(rawValue: raw) {
+            mode = saved
+        } else {
+            mode = .jpy
+        }
+    }
+
+    func setMode(_ newMode: LiquidationMode) {
+        guard mode != newMode else { return }
+        mode = newMode
+        UserDefaults.standard.set(newMode.rawValue, forKey: Self.modeKey)
+        // Previous result used the other formula — clear until user recalculates.
+        result = nil
+        errorText = nil
+    }
+
+    func toggleMode() {
+        setMode(mode == .jpy ? .usd : .jpy)
+    }
 
     func readLatestScreenshotAndCalculate() async {
         errorText = nil
