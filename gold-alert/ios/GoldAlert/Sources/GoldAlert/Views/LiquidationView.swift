@@ -43,9 +43,17 @@ struct LiquidationView: View {
                 .font(.headline)
                 .foregroundStyle(.white)
             Spacer(minLength: 0)
-            Text(model.mode.rawValue)
-                .font(.headline)
-                .foregroundStyle(Color.white.opacity(0.55))
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    model.toggleMode()
+                }
+            } label: {
+                Text(model.mode.rawValue)
+                    .font(.headline)
+                    .foregroundStyle(Color.white.opacity(0.55))
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("点按切换日元/美元模式")
         }
     }
 
