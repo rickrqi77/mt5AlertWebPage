@@ -48,7 +48,7 @@ enum LiquidationCalculator {
             throw AppError.message("GOLD 总手数为 0")
         }
         guard let side = data.side else {
-            throw AppError.message("GOLD 同时有 buy 和 sell，无法用同一套公式算爆仓价")
+            throw AppError.message("GOLD 同时有 buy 和 sell，无法用同一套公式算最终价")
         }
 
         let average = data.averageEntry

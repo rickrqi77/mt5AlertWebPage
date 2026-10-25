@@ -36,8 +36,14 @@ struct AlertRowView: View {
                 .foregroundStyle(.white)
 
             Button("删除") { onDelete() }
-                .font(.subheadline)
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
                 .foregroundStyle(Color(red: 0.9, green: 0.4, blue: 0.35))
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color(red: 0.9, green: 0.4, blue: 0.35).opacity(0.85), lineWidth: 1)
+                )
         }
     }
 

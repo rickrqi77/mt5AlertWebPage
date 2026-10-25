@@ -8,12 +8,11 @@ struct MainView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 header
                 priceHero
                 LiquidationView()
-                stepPanel
-                actionRow
+                controlsRow
                 alertsPanel
                 pauseButton
                 footer
@@ -95,51 +94,39 @@ struct MainView: View {
         .padding(.vertical, 8)
     }
 
-    private var stepPanel: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("间隔")
-                .font(.subheadline)
-                .foregroundStyle(Color.white.opacity(0.55))
-            HStack(spacing: 10) {
-                Picker("间隔", selection: $model.step) {
-                    ForEach(AppViewModel.stepChoices, id: \.self) { value in
-                        Text(String(Int(value))).tag(value)
-                    }
+    /// One menu + three action buttons: equal width/height, no outer card.
+    private var controlsRow: some View {
+        HStack(spacing: 6) {
+            Picker("间隔", selection: $model.step) {
+                ForEach(AppViewModel.stepChoices, id: \.self) { value in
+                    Text(String(Int(value))).tag(value)
                 }
-                .pickerStyle(.menu)
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.08)))
-
-                Button {
-                    Task { await model.autoGenerate() }
-                } label: {
-                    Text("设定")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(Color(red: 0.23, green: 0.48, blue: 0.84))
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                }
-                .frame(maxWidth: .infinity)
-                .disabled(model.busy)
             }
-        }
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
-    }
+            .pickerStyle(.menu)
+            .font(.headline)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Color.white.opacity(0.1))
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
 
-    private var actionRow: some View {
-        HStack(spacing: 10) {
+            Button {
+                Task { await model.autoGenerate() }
+            } label: {
+                Text("设定")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .background(Color(red: 0.23, green: 0.48, blue: 0.84))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .disabled(model.busy)
+
             Button {
                 confirmClear = true
             } label: {
                 Text("全部清除")
                     .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     .background(Color(red: 0.75, green: 0.22, blue: 0.17))
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -154,8 +141,7 @@ struct MainView: View {
             } label: {
                 Text("保存设置")
                     .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     .background(Color(red: 0.83, green: 0.63, blue: 0.09))
                     .foregroundStyle(.black)
                     .clipShape(RoundedRectangle(cornerRadius: 10))

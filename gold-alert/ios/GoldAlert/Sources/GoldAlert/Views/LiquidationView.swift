@@ -12,7 +12,7 @@ struct LiquidationView: View {
                 }
             } label: {
                 HStack {
-                    Text("爆仓价")
+                    Text("最终价")
                         .font(.headline)
                         .foregroundStyle(.white)
                     Spacer()
@@ -81,10 +81,10 @@ struct LiquidationView: View {
 
     private func resultCard(_ r: LiquidationResult) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            row("平均价", format(r.averagePrice, digits: 5))
+            row("平均价", format2(r.averagePrice))
             row("手数", format(r.totalLots, digits: 2))
-            row("爆仓价", format(r.liquidationPrice, digits: 5), emphasize: true)
-            row("可承受点数", format(r.affordablePoints, digits: 5))
+            row("可承受点数", format2(r.affordablePoints))
+            row("最终价", format2(r.liquidationPrice), emphasize: true)
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.06)))
@@ -100,6 +100,10 @@ struct LiquidationView: View {
                 .font(emphasize ? .title3.weight(.bold).monospacedDigit() : .body.monospacedDigit())
                 .foregroundStyle(emphasize ? Color(red: 0.83, green: 0.63, blue: 0.09) : .white)
         }
+    }
+
+    private func format2(_ value: Double) -> String {
+        String(format: "%.2f", value)
     }
 
     private func format(_ value: Double, digits: Int) -> String {
