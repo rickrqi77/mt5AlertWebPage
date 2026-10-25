@@ -11,15 +11,15 @@ struct MainView: View {
             VStack(alignment: .leading, spacing: 12) {
                 header
                 priceHero
-                LiquidationView()
                 stepAndAutoRow
                 saveAndClearRow
-                alertsPanel
                 pauseButton
-                footer
+                alertsPanel
+                LiquidationView()
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .padding(.bottom, 20)
         }
         .confirmationDialog("确定清除全部提醒？", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("清除", role: .destructive) {
@@ -212,15 +212,6 @@ struct MainView: View {
                 .foregroundStyle(.white)
         }
         .disabled(model.busy)
-    }
-
-    private var footer: some View {
-        Text(model.lastRefreshText)
-            .font(.caption2)
-            .foregroundStyle(Color.white.opacity(0.35))
-            .frame(maxWidth: .infinity)
-            .padding(.top, 4)
-            .padding(.bottom, 20)
     }
 
     private func format(_ value: Double) -> String {
