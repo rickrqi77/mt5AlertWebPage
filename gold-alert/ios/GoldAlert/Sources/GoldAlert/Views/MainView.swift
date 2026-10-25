@@ -13,7 +13,6 @@ struct MainView: View {
                 priceHero
                 stepAndAutoRow
                 saveAndClearRow
-                pauseButton
                 alertsPanel
                 LiquidationView()
             }
