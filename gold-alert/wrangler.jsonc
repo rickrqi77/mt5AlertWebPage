@@ -4,11 +4,7 @@
   "main": "worker/src/index.js",
   "account_id": "33b860554fbcb24db639ae34ad2ea919",
   "compatibility_date": "2025-10-01",
-  "assets": {
-    "directory": "./web",
-    "binding": "ASSETS",
-    "not_found_handling": "single-page-application"
-  },
+  "workers_dev": true,
   "d1_databases": [
     {
       "binding": "DB",
@@ -16,7 +12,11 @@
       "database_id": "9da0baf0-88bb-4771-8be6-c01532699203"
     }
   ]
-  // Secrets (set via CLI, never commit):
+  // Static web UI is on Cloudflare Pages (alertdata.pages.dev).
+  // /api is proxied by functions/api/[[path]].js → this Worker.
+  // Deploy API: npm run deploy
+  // Deploy web+proxy: npm run pages:deploy
+  // Secrets (optional if first unlock bootstraps D1 api_token):
   //   npx wrangler secret put API_TOKEN
   //   npx wrangler secret put TELEGRAM_BOT_TOKEN
   //   npx wrangler secret put TELEGRAM_CHAT_ID

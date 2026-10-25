@@ -1,5 +1,7 @@
 /**
  * Proxy /api/* from alertdata.pages.dev to the gold-alert Worker.
+ * Must be redeployed with `npm run pages:deploy` from gold-alert/
+ * (Wrangler picks up ../functions relative to CWD).
  */
 const WORKER_ORIGIN = "https://gold-alert.rick-rqi-apple.workers.dev";
 
@@ -22,5 +24,43 @@ export async function onRequest(context) {
     init.body = incoming.body;
   }
 
-  return fetch(dest, init);
+  try {
+    const res = await fetch(dest, init);
+    // Surface Worker outages as JSON instead of an opaque HTML 404.
+    if (res.status === 404) {
+      const ctype = res.headers.get("content-type") || "";
+      if (!ctype.includes("application/json")) {
+        return new Response(
+          JSON.stringify({
+            error: "API worker unavailable",
+            detail: "gold-alert Worker returned non-JSON 404",
+            upstream: WORKER_ORIGIN,
+          }),
+          {
+            status: 502,
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+              "access-control-allow-origin": "*",
+            },
+          }
+        );
+      }
+    }
+    return res;
+  } catch (err) {
+    return new Response(
+      JSON.stringify({
+        error: "API proxy failed",
+        detail: String((err && err.message) || err),
+        upstream: WORKER_ORIGIN,
+      }),
+      {
+        status: 502,
+        headers: {
+          "content-type": "application/json; charset=utf-8",
+          "access-control-allow-origin": "*",
+        },
+      }
+    );
+  }
 }

@@ -157,13 +157,22 @@
     }
 
     setToken(token);
-    showApp();
-    await warmupData();
-    if (!getToken()) {
-      showAuthError("Token 无效");
-      return;
+    try {
+      await loadLive();
+      dataReady = true;
+      showApp();
+      startPoll();
+    } catch (e) {
+      clearToken();
+      showTokenAuth();
+      if (e && e.status === 404) {
+        showAuthError("API 404：服务未部署，请稍后重试或联系管理员");
+      } else if (e && e.message === "Unauthorized") {
+        showAuthError("Token 无效");
+      } else {
+        showAuthError((e && e.message) || "解锁失败");
+      }
     }
-    startPoll();
   }
 
   // -------------------------------------------------------------------------

@@ -93,7 +93,7 @@ async function handleApi(request, env, url) {
   }
 
   // Auth for all API routes
-  const auth = checkAuth(request, env);
+  const auth = await checkAuth(request, env);
   if (!auth.ok) {
     return json({ error: auth.error }, 401);
   }
@@ -152,32 +152,73 @@ async function handleApi(request, env, url) {
 // Auth
 // ---------------------------------------------------------------------------
 
-function checkAuth(request, env) {
-  const expected = env.API_TOKEN;
-  if (!expected) {
-    return { ok: false, error: "Server API_TOKEN not configured" };
-  }
+let apiTokenColumnReady = false;
 
-  const authHeader = request.headers.get("Authorization") || "";
-  let token = "";
-
-  if (authHeader.toLowerCase().startsWith("bearer ")) {
-    token = authHeader.slice(7).trim();
-  } else {
-    token = request.headers.get("X-Api-Token") || "";
-  }
-
-  // Also allow ?token= for simple browser testing (not preferred)
-  if (!token) {
+async function ensureApiTokenColumn(env) {
+  if (apiTokenColumnReady) return;
+  try {
+    await env.DB.prepare("SELECT api_token FROM settings WHERE id = 1").first();
+  } catch {
     try {
-      const url = new URL(request.url);
-      token = url.searchParams.get("token") || "";
-    } catch (_) {
-      /* ignore */
+      await env.DB.prepare("ALTER TABLE settings ADD COLUMN api_token TEXT").run();
+    } catch {
+      /* column already exists */
     }
   }
+  apiTokenColumnReady = true;
+}
 
-  if (!token || token !== expected) {
+function extractRequestToken(request) {
+  const authHeader = request.headers.get("Authorization") || "";
+  if (authHeader.toLowerCase().startsWith("bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+  const headerToken = request.headers.get("X-Api-Token") || "";
+  if (headerToken) return headerToken.trim();
+  try {
+    return new URL(request.url).searchParams.get("token") || "";
+  } catch (_) {
+    return "";
+  }
+}
+
+async function resolveExpectedToken(env) {
+  const fromSecret = (env.API_TOKEN || "").trim();
+  if (fromSecret) return fromSecret;
+
+  await ensureApiTokenColumn(env);
+  const row = await env.DB.prepare("SELECT api_token FROM settings WHERE id = 1").first();
+  return String((row && row.api_token) || "").trim();
+}
+
+async function bootstrapTokenIfNeeded(env, token) {
+  if (!token) return false;
+  await ensureApiTokenColumn(env);
+  const row = await env.DB.prepare("SELECT api_token FROM settings WHERE id = 1").first();
+  if (row && row.api_token) return false;
+  await env.DB.prepare(
+    "UPDATE settings SET api_token = ?, updated_at = datetime('now') WHERE id = 1"
+  )
+    .bind(token)
+    .run();
+  return true;
+}
+
+async function checkAuth(request, env) {
+  const token = extractRequestToken(request);
+  if (!token) {
+    return { ok: false, error: "Unauthorized" };
+  }
+
+  let expected = await resolveExpectedToken(env);
+  if (!expected) {
+    // Worker secrets were lost (e.g. script recreated). First valid client
+    // token becomes the D1-backed token so existing phones / EA keep working.
+    await bootstrapTokenIfNeeded(env, token);
+    expected = token;
+  }
+
+  if (token !== expected) {
     return { ok: false, error: "Unauthorized" };
   }
   return { ok: true };

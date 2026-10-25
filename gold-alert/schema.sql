@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS settings (
   step REAL NOT NULL DEFAULT 5.0,
   telegram_enabled INTEGER NOT NULL DEFAULT 1,
   alerts_enabled INTEGER NOT NULL DEFAULT 1,
+  api_token TEXT,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

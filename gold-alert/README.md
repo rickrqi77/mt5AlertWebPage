@@ -232,37 +232,28 @@ npx wrangler secret put TELEGRAM_CHAT_ID
 
 ---
 
-## 九、部署 Worker
+## 九、部署 Worker + Pages
+
+API 在 Worker；网页在 Pages。`alertdata.pages.dev/api/*` 由 `functions/api/[[path]].js` 代理到 Worker。
 
 ```bash
+# 1) API Worker（必须）
 npm run deploy
+
+# 2) 网页 + /api 代理（必须带 functions/，在 gold-alert/ 目录执行）
+npm run pages:deploy
+
+# 或一次都部署：
+npm run deploy:all
 ```
 
-或：
-
-```bash
-npx wrangler deploy
-```
-
-成功后会显示类似：
-
-```
-Published gold-alert
-  https://gold-alert.<你的子域>.workers.dev
-```
-
-**记下这个网址**，后面手机和 MT5 都要用。
-
-假设你的地址是：
-
-```
-https://gold-alert.xxxxx.workers.dev
-```
-
-则：
+成功后：
 
 - 手机网页：`https://alertdata.pages.dev/`
-- API 根地址：`https://alertdata.pages.dev` 或 Worker `https://gold-alert.xxxxx.workers.dev`
+- API：`https://alertdata.pages.dev/api/...`（经 Pages Functions 代理）
+- Worker 直连：`https://gold-alert.rick-rqi-apple.workers.dev`
+
+若 Worker 被删过、Secret 丢失：第一次用正确 Token 解锁时会把 Token 写入 D1（也可再执行 `npx wrangler secret put API_TOKEN`）。
 
 ---
 
