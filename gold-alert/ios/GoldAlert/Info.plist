@@ -2,11 +2,15 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDisplayName</key>
+	<string>GOLD ALERT</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>读取交易截图以计算黄金持仓爆仓价，并可在计算后删除该截图。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于在计算完成后按你的选择删除交易截图。</string>
-	<key>CFBundleDisplayName</key>
-	<string>GOLD ALERT</string>
 </dict>
 </plist>

@@ -20,11 +20,6 @@ final class LiquidationViewModel: ObservableObject {
         busy = true
         defer { busy = false }
 
-        guard mode == .jpy else {
-            errorText = "美元模式稍后提供"
-            return
-        }
-
         let allowed = await PhotoLibraryService.requestAccess()
         guard allowed else {
             errorText = "请在设置里允许访问相册（需可删除权限）"
@@ -41,8 +36,14 @@ final class LiquidationViewModel: ObservableObject {
             debugOCR = ocr
 
             let data = try MT5ScreenshotParser.parse(ocrText: ocr)
-            let usdJpy = try await SwissquoteClient.shared.fetchUSDJPY()
-            let calculated = try LiquidationCalculator.calculateJPY(data: data, usdJpyRate: usdJpy)
+            let calculated: LiquidationResult
+            switch mode {
+            case .jpy:
+                let usdJpy = try await SwissquoteClient.shared.fetchUSDJPY()
+                calculated = try LiquidationCalculator.calculateJPY(data: data, usdJpyRate: usdJpy)
+            case .usd:
+                calculated = try LiquidationCalculator.calculateUSD(data: data)
+            }
             result = calculated
             showDeleteConfirm = true
         } catch {

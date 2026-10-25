@@ -48,8 +48,10 @@ struct LiquidationResult: Equatable, Sendable {
     var liquidationPrice: Double
     var balance: Double
     var margin: Double
-    var availableJPY: Double
-    var usdJpyRate: Double
+    /// Present only in JPY mode.
+    var availableJPY: Double?
+    /// Present only in JPY mode.
+    var usdJpyRate: Double?
     var availableUSD: Double
     var affordablePoints: Double
 }

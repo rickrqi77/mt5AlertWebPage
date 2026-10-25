@@ -29,32 +29,28 @@ xtool setup
 
 按提示提供 `Xcode.xip` 路径，生成 iOS Swift SDK。
 
-## 部署到 iPhone（Ad Hoc）
+## 网页安装（推荐，与交通查询相同）
 
-在本目录执行：
+打包到 **`D:\onsite\goldalert`**，用 Safari 打开：
+
+**https://w77.tail708c1b.ts.net/goldalert/**
 
 ```bash
 cd gold-alert/ios/GoldAlert
-xtool dev
+./scripts/pack-onsite.sh
 ```
 
-流程：
+Windows：`scripts\pack-onsite.bat`
 
-1. USB 连接 iPhone（可先 `ideviceinfo` 确认）
-2. 手机上点 **信任** 此电脑
-3. 开启 **开发者模式**（设置 → 隐私与安全性）
-4. xtool 注册设备 → 生成证书 + Provisioning Profile → **签名** → 安装
-5. 首次打开若提示未信任：设置 → 通用 → VPN 与设备管理 → 信任你的 Apple ID
+证书与描述文件放在 `D:\goldalert\adhoc`。完整步骤见 [ADHOC.md](ADHOC.md)。
 
-改完代码再执行一次 `xtool dev` 即可覆盖安装。
-
-### 只打 IPA（可选）
+## 开发装机（USB + xtool 开发签名）
 
 ```bash
-xtool dev build --ipa
+cd gold-alert/ios/GoldAlert
+xtool setup   # 首次
+xtool dev
 ```
-
-再按需用本机签名工具处理；日常装机直接 `xtool dev` 即可。
 
 ## 工程说明
 
@@ -66,18 +62,17 @@ xtool dev build --ipa
 
 默认 API：`https://alertdata.pages.dev`（解锁页可改）。Worker 需已部署含 `POST /api/app/price` 的版本。
 
-## 爆仓价 · 日元模式
+## 爆仓价
 
-1. 点「读取图片」→ 取相册 **截图** 相册最新一张（没有则取最近图片）
-2. Vision OCR，**只处理名称含 GOLD / XAU 的持仓**，忽略其它品种
+1. 点「读取图片」→ 取相册 **截图** 最新一张（没有则取最近图片）
+2. Vision OCR，**只处理名称含 GOLD / XAU 的持仓**
 3. 均价 = Σ(入场价 × 手数) / Σ手数  
-4. 日元可用 = 结余 − 预付款 × 0.2  
-5. 美元可用 = 日元可用 ÷ Swissquote **USD/JPY** 中间价  
-6. 可承受点数 = 美元可用 ÷ (总手数 × 100)  
-7. sell：爆仓价 = 均价 + 点数；buy：爆仓价 = 均价 − 点数  
-8. 算出后询问是否删除该截图  
-
-美元模式公式尚未接入（界面可选，按钮暂禁用）。
+4. 可用资金 = 结余 − 预付款 × 0.2  
+   - **日元模式**：再 ÷ Swissquote USD/JPY → 美元可用  
+   - **美元模式**：跳过换汇，上一步结果就是美元可用  
+5. 可承受点数 = 美元可用 ÷ (总手数 × 100)  
+6. sell：爆仓价 = 均价 + 点数；buy：爆仓价 = 均价 − 点数  
+7. 算出后可删除该截图  
 
 ## 与网页 / EA 的关系
 

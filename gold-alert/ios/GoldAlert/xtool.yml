@@ -3,3 +3,4 @@ bundleID: com.rickrqi77.goldalert
 product: GoldAlert
 iconPath: Icon.png
 infoPath: Info.plist
+entitlementsPath: GoldAlert.entitlements

@@ -19,8 +19,8 @@ struct LiquidationView: View {
             }
 
             Text(model.mode == .jpy
-                 ? "读取最新交易截图，只统计 GOLD 持仓（日元账户）"
-                 : "美元模式公式稍后提供")
+                 ? "读取最新交易截图，只统计 GOLD（日元账户，经 USD/JPY 换算）"
+                 : "读取最新交易截图，只统计 GOLD（美元账户，结余−预付款×0.2 即美元可用）")
                 .font(.caption)
                 .foregroundStyle(Color.white.opacity(0.45))
 
@@ -35,7 +35,7 @@ struct LiquidationView: View {
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
             }
-            .disabled(model.busy || model.mode == .usd)
+            .disabled(model.busy)
 
             if let err = model.errorText, !err.isEmpty {
                 Text(err)
@@ -67,6 +67,7 @@ struct LiquidationView: View {
 
     private func resultCard(_ r: LiquidationResult) -> some View {
         VStack(alignment: .leading, spacing: 10) {
+            row("模式", r.mode.rawValue)
             row("方向", r.side == .sell ? "sell" : "buy")
             row("平均价", format(r.averagePrice, digits: 5))
             row("手数", format(r.totalLots, digits: 2))
@@ -76,8 +77,12 @@ struct LiquidationView: View {
 
             row("结余", format(r.balance, digits: 2))
             row("预付款", format(r.margin, digits: 2))
-            row("日元可用", format(r.availableJPY, digits: 4))
-            row("USD/JPY", format(r.usdJpyRate, digits: 3))
+            if let jpy = r.availableJPY {
+                row("日元可用", format(jpy, digits: 4))
+            }
+            if let rate = r.usdJpyRate {
+                row("USD/JPY", format(rate, digits: 3))
+            }
             row("美元可用", format(r.availableUSD, digits: 4))
             row("可承受点数", format(r.affordablePoints, digits: 5))
         }
