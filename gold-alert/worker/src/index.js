@@ -104,6 +104,9 @@ async function handleApi(request, env, url) {
   if (method === "GET" && path === "/api/spot") {
     return await getSpot(env);
   }
+  if (method === "POST" && path === "/api/app/price") {
+    return await uploadAppPrice(request, env);
+  }
   if (method === "POST" && path === "/api/ea/usage") {
     return await reportAlertUsage(request, env);
   }
@@ -454,7 +457,7 @@ async function autoGenerateAlerts(request, env) {
   const settings = await env.DB.prepare("SELECT step FROM settings WHERE id = 1").first();
   const currentPrice = Number(body.price);
   if (!Number.isFinite(currentPrice) || currentPrice <= 0) {
-    return json({ error: "还没有 EA 价格" }, 400);
+    return json({ error: "还没有价格（请先在 App 取 Swissquote 报价）" }, 400);
   }
 
   let step = body.step != null ? Number(body.step) : Number(settings?.step ?? 5);
@@ -502,6 +505,54 @@ async function autoGenerateAlerts(request, env) {
     step,
     alerts: results || [],
     config_version: ver?.config_version ?? 1,
+  });
+}
+
+async function uploadAppPrice(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const symbol = String(body.symbol || "XAUUSD").slice(0, 32);
+  const bid = Number(body.bid);
+  const ask = Number(body.ask);
+  const price = Number(body.price ?? ((bid + ask) / 2));
+  const source = String(body.source || "swissquote").slice(0, 32);
+
+  if (!Number.isFinite(bid) || !Number.isFinite(ask) || !Number.isFinite(price) || price <= 0) {
+    return json({ error: "Invalid bid/ask/price" }, 400);
+  }
+
+  const now = new Date().toISOString();
+
+  // App uploads Swissquote mid for settings/auto-generate.
+  // Do not mark EA online — EA still reports itself via /api/ea/sync.
+  await env.DB.prepare(
+    `UPDATE system_status SET
+      symbol = ?,
+      price = ?,
+      bid = ?,
+      ask = ?,
+      updated_at = ?
+     WHERE id = 1`
+  )
+    .bind(symbol, roundPrice(price), roundPrice(bid), roundPrice(ask), now)
+    .run();
+
+  const status = await env.DB.prepare("SELECT config_version FROM system_status WHERE id = 1").first();
+
+  return json({
+    ok: true,
+    symbol,
+    price: roundPrice(price),
+    bid: roundPrice(bid),
+    ask: roundPrice(ask),
+    source,
+    config_version: status?.config_version ?? 1,
+    server_time: now,
   });
 }
 

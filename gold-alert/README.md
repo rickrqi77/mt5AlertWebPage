@@ -21,14 +21,20 @@ gold-alert/
 ├── wrangler.jsonc           # Wrangler 配置
 ├── schema.sql               # D1 数据库结构
 ├── package.json
-├── web/
-│   ├── index.html           # 手机网页
-│   ├── style.css
-│   └── app.js
+├── web/                     # 手机网页（可选；App 可独立完成设定）
+├── ios/GoldAlert/           # 原生 iOS App（xtool Ad Hoc，无需 Mac）
 ├── mt5/
 │   └── GoldPriceAlert.mq5   # MetaTrader 5 EA（必须是 .mq5）
 └── README.md
 ```
+
+### iOS App（推荐，可不打开网页）
+
+原生 SwiftUI，用 [xtool](https://xtool.sh) 在 Linux/Windows 上 **Ad Hoc** 装到 iPhone：
+
+- 价格：App 直连 **Swissquote**，再 `POST /api/app/price` 上传 Cloudflare
+- 提醒：与网页相同，写入 Cloudflare；EA 仍读 Cloudflare
+- 说明与部署：见 `ios/GoldAlert/README.md`（`xtool setup` → `xtool dev`）
 
 ---
 
@@ -408,6 +414,8 @@ Authorization: Bearer <API_TOKEN>
 | 方法 | 路径 | 用途 |
 |------|------|------|
 | POST | `/api/ea/sync` | EA 的唯一周期请求：上报价格和使用情况，响应里带回已保存的提醒 |
+| POST | `/api/app/price` | iOS App 上传 Swissquote 报价（不标记 EA 在线） |
+| GET | `/api/spot` | Worker 代拉 Swissquote（网页可选；App 直连 Swissquote） |
 | GET | `/api/status` | 网页打开时读取 EA 刚写入的价格、提醒和使用情况 |
 | GET | `/api/alerts` | 提醒列表 |
 | POST | `/api/alerts` | 保存提醒（最多 15） |
