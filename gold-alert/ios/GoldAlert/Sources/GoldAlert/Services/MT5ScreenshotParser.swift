@@ -1,7 +1,10 @@
 import Foundation
 
 /// Parses OCR text from an MT5 Chinese trade screenshot.
-/// Only GOLD* symbols are kept; other instruments are ignored.
+/// Only GOLD* / XAU* positions are kept.
+///
+/// Average entry uses each position's **left** price under GOLD
+/// (开仓价 in `3988.21 → 3989.22`), never the right-hand 现价.
 enum MT5ScreenshotParser {
     static func parse(ocrText: String) throws -> ScreenshotTradeData {
         let normalized = normalize(ocrText)
@@ -22,7 +25,8 @@ enum MT5ScreenshotParser {
             throw AppError.message("截图里找不到「预付款」")
         }
 
-        let positions = extractGoldPositions(from: lines + [normalized])
+        // Only real OCR lines — do not append the joined blob (that duplicated positions).
+        let positions = extractGoldPositions(from: lines)
         guard !positions.isEmpty else {
             throw AppError.message("截图里没有 GOLD 持仓")
         }
@@ -34,7 +38,6 @@ enum MT5ScreenshotParser {
 
     private static func findMargin(in lines: [String]) -> Double? {
         for (index, line) in lines.enumerated() {
-            // Prefer exact 预付款 row; skip 可用预付款 / 预付款比率
             if line.contains("可用预付款") || line.contains("预付款比率") {
                 continue
             }
@@ -75,18 +78,15 @@ enum MT5ScreenshotParser {
     }
 
     private static func numberAfterLabel(lines: [String], index: Int, label: String) -> Double? {
-        // Same line after label
         let line = lines[index]
         if let range = line.range(of: label) {
             let after = String(line[range.upperBound...])
             if let n = firstNumber(in: after) { return n }
         }
-        // Next few lines (MT5 often stacks label above value)
         for offset in 1...3 {
             let i = index + offset
             guard i < lines.count else { break }
             let candidate = lines[i]
-            // Stop if next label appears
             if candidate.contains("结余") || candidate.contains("净值")
                 || candidate.contains("预付款") || candidate.contains("持仓") {
                 break
@@ -100,98 +100,101 @@ enum MT5ScreenshotParser {
 
     private static func extractGoldPositions(from lines: [String]) -> [GoldPosition] {
         var positions: [GoldPosition] = []
-        let joined = lines.joined(separator: "\n")
-
-        // Pattern A: GOLD24-7# sell 0.01  (possibly split across lines)
-        let symbolSideLots = try! NSRegularExpression(
-            pattern: #"(?i)(GOLD[A-Z0-9#._\-]*)\s*(buy|sell)\s*([0-9]+(?:\.[0-9]+)?)"#,
-            options: []
-        )
-        let priceArrow = try! NSRegularExpression(
-            pattern: #"([0-9]+(?:\.[0-9]+)?)\s*(?:→|->|—|-|–)\s*([0-9]+(?:\.[0-9]+)?)"#,
-            options: []
-        )
-
-        // Walk line-by-line for pairing with following price arrow
         var i = 0
         while i < lines.count {
             let line = lines[i]
-            let ns = line as NSString
-            let full = NSRange(location: 0, length: ns.length)
-            if let match = symbolSideLots.firstMatch(in: line, options: [], range: full),
-               match.numberOfRanges >= 4 {
-                let symbol = ns.substring(with: match.range(at: 1)).uppercased()
-                let sideRaw = ns.substring(with: match.range(at: 2)).lowercased()
-                let lots = Double(ns.substring(with: match.range(at: 3))) ?? 0
-                let side: PositionSide = sideRaw == "buy" ? .buy : .sell
-
-                // Entry = left number under GOLD (开仓价), never the right-hand 现价.
-                let nearby = Array(lines[i..<min(i + 3, lines.count)])
-                let entry = leftEntryPrice(in: nearby, priceArrow: priceArrow)
-
-                if lots > 0, let entry, isGoldSymbol(symbol) {
-                    positions.append(GoldPosition(symbol: symbol, side: side, lots: lots, entryPrice: entry))
-                }
+            guard let symbol = goldSymbol(in: line) else {
+                i += 1
+                continue
             }
+
+            // Same line, or next few lines: "sell 0.01" / "buy 0.01"
+            let window = Array(lines[i..<min(i + 4, lines.count)])
+            guard let sideLots = detectSideAndLots(in: window) else {
+                i += 1
+                continue
+            }
+
+            // Price line is under the GOLD row, e.g. "3988.21 → 3989.22" → use 3988.21
+            guard let entry = leftEntryPrice(in: window) else {
+                i += 1
+                continue
+            }
+
+            positions.append(
+                GoldPosition(
+                    symbol: symbol,
+                    side: sideLots.side,
+                    lots: sideLots.lots,
+                    entryPrice: entry
+                )
+            )
             i += 1
         }
 
-        // Fallback: whole-document regex if line pairing missed (OCR mashed layout)
-        if positions.isEmpty {
-            let nsJoined = joined as NSString
-            let full = NSRange(location: 0, length: nsJoined.length)
-            let matches = symbolSideLots.matches(in: joined, options: [], range: full)
-            let priceMatches = priceArrow.matches(in: joined, options: [], range: full)
-            for (idx, match) in matches.enumerated() where match.numberOfRanges >= 4 {
-                let symbol = nsJoined.substring(with: match.range(at: 1)).uppercased()
-                guard isGoldSymbol(symbol) else { continue }
-                let sideRaw = nsJoined.substring(with: match.range(at: 2)).lowercased()
-                let lots = Double(nsJoined.substring(with: match.range(at: 3))) ?? 0
-                let side: PositionSide = sideRaw == "buy" ? .buy : .sell
-                // Prefer the left price of the first pair after this GOLD match.
-                let entry: Double? = {
-                    let start = match.range.location
-                    for pm in priceMatches where pm.range.location >= start && pm.numberOfRanges >= 2 {
-                        let left = Double(nsJoined.substring(with: pm.range(at: 1))) ?? 0
-                        if isGoldPrice(left) { return left }
-                    }
-                    // No arrow: take left of the first two gold-range numbers after match.
-                    let from = min(start, nsJoined.length)
-                    let len = min(160, nsJoined.length - from)
-                    let after = nsJoined.substring(with: NSRange(location: from, length: len))
-                    let prices = allNumbers(in: after).filter(isGoldPrice)
-                    if prices.count >= 2 { return prices[0] }
-                    return prices.first
-                }()
-                if lots > 0, let entry {
-                    positions.append(GoldPosition(symbol: symbol, side: side, lots: lots, entryPrice: entry))
-                }
-            }
-        }
-
-        return positions
+        return dedupe(positions)
     }
 
-    private static func isGoldSymbol(_ symbol: String) -> Bool {
-        let s = symbol.uppercased()
-        return s.contains("GOLD") || s.hasPrefix("XAU")
+    private static func goldSymbol(in line: String) -> String? {
+        // No trailing \b: symbols often end with '#' (non-word), which breaks \b.
+        let pattern = #"(?i)\b(GOLD[A-Z0-9#._\-]*|XAU[A-Z0-9#._\-]*)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = line as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        guard let match = regex.firstMatch(in: line, options: [], range: full) else { return nil }
+        return ns.substring(with: match.range(at: 1)).uppercased()
     }
 
-    /// Left number of the price pair under GOLD (开仓价); ignore 现价 on the right.
-    private static func leftEntryPrice(in lines: [String], priceArrow: NSRegularExpression) -> Double? {
+    private static func detectSideAndLots(in lines: [String]) -> (side: PositionSide, lots: Double)? {
+        let text = lines.joined(separator: " ")
+        let pattern = #"(?i)\b(buy|sell)\b\s*([0-9]+(?:\.[0-9]+)?)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = text as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        guard let match = regex.firstMatch(in: text, options: [], range: full),
+              match.numberOfRanges >= 3 else { return nil }
+        let sideRaw = ns.substring(with: match.range(at: 1)).lowercased()
+        let lots = Double(ns.substring(with: match.range(at: 2))) ?? 0
+        guard lots > 0, lots < 100 else { return nil }
+        let side: PositionSide = sideRaw == "buy" ? .buy : .sell
+        return (side, lots)
+    }
+
+    /// Left number of `开仓价 → 现价` under GOLD.
+    /// Do not treat the hyphen inside `GOLD24-7` as a price arrow.
+    private static func leftEntryPrice(in lines: [String]) -> Double? {
+        // Both sides must look like gold prices (3+ digits). No bare "-" (breaks GOLD24-7).
+        let arrow = try! NSRegularExpression(
+            pattern: #"([0-9]{3,}(?:\.[0-9]+)?)\s*(?:→|->|➜|⇒|—|–|>|›|»|\s-\s)\s*([0-9]{3,}(?:\.[0-9]+)?)"#
+        )
         for line in lines {
             let ns = line as NSString
             let full = NSRange(location: 0, length: ns.length)
-            if let pm = priceArrow.firstMatch(in: line, options: [], range: full),
-               pm.numberOfRanges >= 2 {
+            let matches = arrow.matches(in: line, options: [], range: full)
+            for pm in matches where pm.numberOfRanges >= 3 {
                 let left = Double(ns.substring(with: pm.range(at: 1))) ?? 0
-                if isGoldPrice(left) { return left }
+                let right = Double(ns.substring(with: pm.range(at: 2))) ?? 0
+                if isGoldPrice(left), isGoldPrice(right) { return left }
             }
+            // No arrow glyph: two gold-range prices on one line → left is entry.
             let prices = allNumbers(in: line).filter(isGoldPrice)
             if prices.count >= 2 { return prices[0] }
         }
-        let all = lines.flatMap { allNumbers(in: $0) }.filter(isGoldPrice)
-        return all.first
+        return nil
+    }
+
+    private static func dedupe(_ positions: [GoldPosition]) -> [GoldPosition] {
+        var out: [GoldPosition] = []
+        for p in positions {
+            let dup = out.contains {
+                $0.symbol == p.symbol
+                    && $0.side == p.side
+                    && abs($0.lots - p.lots) < 1e-9
+                    && abs($0.entryPrice - p.entryPrice) < 1e-6
+            }
+            if !dup { out.append(p) }
+        }
+        return out
     }
 
     private static func isGoldPrice(_ value: Double) -> Bool {
@@ -202,16 +205,15 @@ enum MT5ScreenshotParser {
 
     private static func normalize(_ text: String) -> String {
         var s = text
-        // Common OCR confusions
         s = s.replacingOccurrences(of: "−", with: "-")
         s = s.replacingOccurrences(of: "—", with: "→")
         s = s.replacingOccurrences(of: "–", with: "→")
         s = s.replacingOccurrences(of: "→", with: " → ")
-        // Collapse weird spaces but keep newlines
         let lines = s.components(separatedBy: .newlines).map { line -> String in
             var l = line
-            // "136 466" / "12 508" / "1 088.51" → remove thousand spaces between digits
-            while let range = l.range(of: #"(\d) (\d)"#, options: .regularExpression) {
+            // Only collapse thousand separators like "136 466" / "1 088.51".
+            // Do NOT join separate values such as "0.01 3988.21" or "3988.21 3989.22".
+            while let range = l.range(of: #"(\d) (\d{3}(?:\D|$))"#, options: .regularExpression) {
                 let compact = l[range].replacingOccurrences(of: " ", with: "")
                 l.replaceSubrange(range, with: compact)
             }
