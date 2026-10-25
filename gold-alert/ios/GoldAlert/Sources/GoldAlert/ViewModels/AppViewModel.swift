@@ -89,7 +89,7 @@ final class AppViewModel: ObservableObject {
         Task { await refreshCloudState() }
         priceTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refreshSwissquoteAndUpload()
+                await self?.refreshSwissquote()
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
             }
         }
@@ -100,21 +100,15 @@ final class AppViewModel: ObservableObject {
         priceTask = nil
     }
 
-    /// App-side price path: Swissquote → show → upload Cloudflare (EA still syncs separately).
-    func refreshSwissquoteAndUpload() async {
-        guard isUnlocked, !token.isEmpty else { return }
+    /// Swissquote is display-only on device. Cloudflare only gets alert/settings for the EA.
+    func refreshSwissquote() async {
+        guard isUnlocked else { return }
         do {
             let q = try await SwissquoteClient.shared.fetchQuote()
             quote = q
             priceLabel = "Swissquote"
             lastRefreshText = "现货 " + Self.clockString()
-            _ = try await CloudflareClient.shared.uploadPrice(
-                baseURL: baseURL,
-                token: token,
-                quote: q
-            )
         } catch {
-            // Keep last good quote; surface transient errors lightly.
             if quote.price <= 0 {
                 showToast(error.localizedDescription, error: true)
             }
@@ -150,12 +144,7 @@ final class AppViewModel: ObservableObject {
         busy = true
         defer { busy = false }
         do {
-            // Ensure Cloudflare has the same mid before auto (and for any other clients).
-            _ = try await CloudflareClient.shared.uploadPrice(
-                baseURL: baseURL,
-                token: token,
-                quote: quote
-            )
+            // Auto uses local Swissquote mid only to build the grid; EA still owns live price.
             let data = try await CloudflareClient.shared.autoGenerate(
                 baseURL: baseURL,
                 token: token,

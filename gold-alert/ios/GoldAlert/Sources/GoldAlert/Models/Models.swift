@@ -92,15 +92,6 @@ struct PauseResponse: Decodable, Sendable {
     var error: String?
 }
 
-struct PriceUploadResponse: Decodable, Sendable {
-    var ok: Bool?
-    var price: Double?
-    var bid: Double?
-    var ask: Double?
-    var source: String?
-    var error: String?
-}
-
 /// Accepts JSON booleans or 0/1 integers from D1.
 enum BoolOrInt: Decodable, Sendable {
     case bool(Bool)

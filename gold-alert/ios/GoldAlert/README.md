@@ -6,8 +6,8 @@
 
 - 本机保存 API Token（Keychain）
 - **Swissquote** 直连取 XAU/USD（`forex-data-feed.swissquote.com`），不走网页
-- 取到报价后由 App 调用 `POST /api/app/price` 上传 Cloudflare（不标记 EA 在线）
-- 设定 / 保存 / 清除 / 暂停：与网页同一套 Cloudflare API，EA 下次 `/api/ea/sync` 读到
+- Swissquote 报价只在本机显示（和「设定」生成网格用），**不上传** Cloudflare
+- 设定 / 保存 / 清除 / 暂停：只把提醒数据写入 Cloudflare，EA 下次 `/api/ea/sync` 读到
 - **爆仓价（日元模式）**：读取相册最新截图 → OCR 只解析 GOLD 持仓 → 显示平均价 / 手数 / 爆仓价，并可删除截图
 
 ## 一次性：安装 xtool（Linux / Windows）

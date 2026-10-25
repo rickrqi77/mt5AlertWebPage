@@ -26,18 +26,6 @@ actor CloudflareClient {
         try await get("/api/settings", baseURL: baseURL, token: token)
     }
 
-    /// Upload Swissquote quote so Cloudflare holds the latest mid for settings/auto.
-    func uploadPrice(baseURL: String, token: String, quote: Quote) async throws -> PriceUploadResponse {
-        let body: [String: Any] = [
-            "symbol": quote.symbol,
-            "bid": quote.bid,
-            "ask": quote.ask,
-            "price": quote.price,
-            "source": quote.source.isEmpty ? "swissquote" : quote.source,
-        ]
-        return try await post("/api/app/price", baseURL: baseURL, token: token, json: body)
-    }
-
     func saveAlerts(
         baseURL: String,
         token: String,
