@@ -1,25 +1,27 @@
 /**
  * GOLD ALERT - Mobile web client
- * API Token is entered by the user (never hardcoded) and kept in localStorage
- * until the next local calendar day.
+ * Token is entered once per device and remembered; new devices must enter it first.
  */
 
 (function () {
   "use strict";
 
-  const MAX_ALERTS = 11;
-  const REFRESH_MS = 1000;
+  const MAX_ALERTS = 15;
   const TOKEN_KEY = "gold_alert_api_token";
-  const TOKEN_DAY_KEY = "gold_alert_api_token_day";
+  const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 365 * 10;
 
   /** @type {Array<{id?: number|null, price: string, enabled: boolean, triggered: boolean}>} */
   let localAlerts = [];
-  let refreshTimer = null;
   let toastTimer = null;
   let stepHydrated = false;
   let capturedStep = null;
   let alertsPaused = false;
   let alertsDirty = false;
+  let warmupPromise = null;
+  let dataReady = false;
+  let spotPrice = null;
+  let pollTimer = null;
+  let pollMs = 3000;
 
   const $ = (id) => document.getElementById(id);
 
@@ -27,46 +29,65 @@
   // Auth
   // -------------------------------------------------------------------------
 
-  function todayKey() {
-    const d = new Date();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return d.getFullYear() + "-" + m + "-" + day;
+  function cookieFlags() {
+    var flags = "; Path=/; SameSite=Lax; Max-Age=" + TOKEN_COOKIE_MAX_AGE;
+    if (location.protocol === "https:") flags += "; Secure";
+    return flags;
   }
 
-  function storageGet(key) {
-    try {
-      return localStorage.getItem(key) || "";
-    } catch {
-      return "";
-    }
+  function readCookie(name) {
+    var parts = ("; " + document.cookie).split("; " + name + "=");
+    if (parts.length < 2) return "";
+    return decodeURIComponent(parts.pop().split(";").shift() || "");
   }
 
-  function storageSet(key, value) {
+  function writeCookie(name, value) {
+    document.cookie = name + "=" + encodeURIComponent(value) + cookieFlags();
+  }
+
+  function deleteCookie(name) {
+    document.cookie = name + "=; Path=/; SameSite=Lax; Max-Age=0";
+  }
+
+  function persistKey(key, value) {
+    if (!value) return;
     try {
       localStorage.setItem(key, value);
     } catch {
-      /* private mode or blocked storage */
+      /* Safari private mode may block localStorage */
     }
+    writeCookie(key, value);
   }
 
-  function storageRemove(key) {
+  function persistToken(token) {
+    persistKey(TOKEN_KEY, token);
+  }
+
+  function readStored(key) {
+    var value = "";
     try {
-      localStorage.removeItem(key);
+      value = localStorage.getItem(key) || "";
     } catch {
-      /* ignore */
+      value = "";
     }
+    if (!value) {
+      try {
+        value = sessionStorage.getItem(key) || "";
+      } catch {
+        value = "";
+      }
+    }
+    if (!value) value = readCookie(key);
+    if (value) persistKey(key, value);
+    return value;
   }
 
-  function readSessionToken() {
-    try {
-      return sessionStorage.getItem(TOKEN_KEY) || "";
-    } catch {
-      return "";
-    }
+  function getToken() {
+    return readStored(TOKEN_KEY);
   }
 
-  function clearSessionToken() {
+  function setToken(token) {
+    persistToken(token);
     try {
       sessionStorage.removeItem(TOKEN_KEY);
     } catch {
@@ -74,74 +95,75 @@
     }
   }
 
-  function getToken() {
-    const token = storageGet(TOKEN_KEY);
-    const day = storageGet(TOKEN_DAY_KEY);
-    if (token && day === todayKey()) return token;
-
-    // Saved token is from another day: ask again.
-    if (token || day) {
-      clearToken();
-      return "";
+  function clearStored(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      /* ignore */
     }
-
-    // Upgrade a token saved by the previous session-only build.
-    const sessionToken = readSessionToken();
-    if (sessionToken) {
-      setToken(sessionToken);
-      clearSessionToken();
-      return sessionToken;
+    try {
+      sessionStorage.removeItem(key);
+    } catch {
+      /* ignore */
     }
-    return "";
-  }
-
-  function setToken(token) {
-    storageSet(TOKEN_KEY, token);
-    storageSet(TOKEN_DAY_KEY, todayKey());
+    deleteCookie(key);
   }
 
   function clearToken() {
-    storageRemove(TOKEN_KEY);
-    storageRemove(TOKEN_DAY_KEY);
-    clearSessionToken();
+    clearStored(TOKEN_KEY);
+  }
+
+  function hideAuthError() {
+    var errEl = $("auth-error");
+    errEl.classList.add("hidden");
+    errEl.textContent = "";
+  }
+
+  function showAuthError(msg) {
+    var errEl = $("auth-error");
+    errEl.textContent = msg;
+    errEl.classList.remove("hidden");
+  }
+
+  function showTokenAuth() {
+    stopPoll();
+    $("auth-screen").classList.remove("hidden");
+    $("app-screen").classList.add("hidden");
+    $("auth-hint").textContent = "新设备输入一次 Token，本机以后不用再输入";
+    hideAuthError();
   }
 
   function showAuth() {
-    $("auth-screen").classList.remove("hidden");
-    $("app-screen").classList.add("hidden");
-    const input = $("token-input");
-    if (input) input.value = "";
-    stopRefresh();
+    showTokenAuth();
   }
 
   function showApp() {
     $("auth-screen").classList.add("hidden");
     $("app-screen").classList.remove("hidden");
-    startRefresh();
-    refreshAll();
+  }
+
+  function enterApp() {
+    showApp();
+    startWarmupAndPoll();
   }
 
   async function unlock() {
     const token = ($("token-input").value || "").trim();
-    const errEl = $("auth-error");
-    errEl.classList.add("hidden");
+    hideAuthError();
 
     if (!token) {
-      errEl.textContent = "请输入 API Token";
-      errEl.classList.remove("hidden");
+      showAuthError("请输入 API Token");
       return;
     }
 
     setToken(token);
-    try {
-      await api("/api/status");
-      showApp();
-      await loadAlerts();
-    } catch (e) {
-      clearToken();
-      errEl.textContent = e.message === "Unauthorized" ? "Token 无效" : e.message;
-      errEl.classList.remove("hidden");
+    showApp();
+    await warmupData();
+    if (!getToken()) {
+      showAuthError("Token 无效");
+      return;
     }
+    startPoll();
   }
 
   // -------------------------------------------------------------------------
@@ -228,58 +250,13 @@
     }
   }
 
-  function renderEaStatus(online) {
-    const el = $("ea-status");
-    const text = $("ea-status-text");
-    if (online) {
-      el.classList.add("online");
-      el.classList.remove("offline");
-      text.textContent = "🟢 EA 在线";
-    } else {
-      el.classList.add("offline");
-      el.classList.remove("online");
-      text.textContent = "🔴 EA 离线";
-    }
-  }
-
   function armCount() {
     return localAlerts.filter((a) => a.enabled).length;
-  }
-
-  function allDisarmed() {
-    return localAlerts.length > 0 && localAlerts.every((a) => !a.enabled);
-  }
-
-  function renderClearButton() {
-    const btn = $("btn-clear");
-    if (!btn) return;
-    const rearm = allDisarmed();
-    btn.textContent = rearm ? "再设定" : "清除";
-    btn.classList.toggle("rearm", rearm);
-    btn.disabled = localAlerts.length === 0;
-  }
-
-  function closestAlertIndex(alerts, price) {
-    let best = -1;
-    let bestDiff = Infinity;
-    let bestPrice = Infinity;
-    for (let i = 0; i < alerts.length; i++) {
-      const p = Number(alerts[i].price);
-      if (!Number.isFinite(p)) continue;
-      const diff = Math.abs(p - price);
-      if (diff < bestDiff - 1e-9 || (Math.abs(diff - bestDiff) <= 1e-9 && p < bestPrice)) {
-        bestDiff = diff;
-        bestPrice = p;
-        best = i;
-      }
-    }
-    return best;
   }
 
   function renderAlerts() {
     const list = $("alerts-list");
     $("alerts-count").textContent = "触发 " + armCount() + " / " + localAlerts.length;
-    renderClearButton();
 
     if (localAlerts.length === 0) {
       list.innerHTML = '<li class="empty-hint">暂无提醒，点「设定」生成后选择要触发的价格</li>';
@@ -289,6 +266,7 @@
     list.innerHTML = "";
     localAlerts.forEach((a, idx) => {
       const on = !!a.enabled;
+      const used = !on && !!a.triggered;
       const li = document.createElement("li");
       li.className = "alert-item";
       li.innerHTML =
@@ -302,11 +280,11 @@
         idx +
         '" />' +
         '<button type="button" class="btn-arm ' +
-        (on ? "on" : "off") +
+        (used ? "used" : on ? "on" : "off") +
         '" data-idx="' +
         idx +
         '">' +
-        (on ? "触发" : "关闭") +
+        (used ? "已用" : on ? "触发" : "关闭") +
         "</button>" +
         '<button type="button" class="btn-delete" data-idx="' +
         idx +
@@ -375,24 +353,73 @@
   // Data refresh
   // -------------------------------------------------------------------------
 
-  async function refreshStatus() {
-    const data = await api("/api/status");
-    $("symbol").textContent = data.symbol || "XAUUSD";
+  function showQuote(data) {
     $("current-price").textContent = formatPrice(data.price);
     $("bid").textContent = formatPrice(data.bid);
     $("ask").textContent = formatPrice(data.ask);
-    renderEaStatus(!!data.ea_online);
+  }
+
+  async function loadSettings() {
+    const data = await api("/api/settings");
     alertsPaused = !!data.paused || data.alerts_enabled === false;
     renderPauseButton();
-    // Do not overwrite the interval the user is editing. Status polling used to
-    // reset the box back to the last saved server value (often 5).
     if (!stepHydrated && data.step != null) {
       setStepInput(data.step);
       stepHydrated = true;
     }
-    $("last-refresh").textContent =
-      "刷新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
     return data;
+  }
+
+  async function loadLive() {
+    const data = await api("/api/status");
+    $("symbol").textContent = data.symbol || "XAUUSD";
+    const price = Number(data.price);
+    if (Number.isFinite(price) && price > 0) {
+      spotPrice = price;
+      showQuote(data);
+    }
+    alertsPaused = !!data.paused || data.alerts_enabled === false;
+    renderPauseButton();
+    if (!stepHydrated && data.step != null) {
+      setStepInput(data.step);
+      stepHydrated = true;
+    }
+    const sec = Number(data.sync_seconds);
+    if (Number.isInteger(sec) && sec >= 3 && sec <= 3600 && sec * 1000 !== pollMs) {
+      pollMs = sec * 1000;
+      if (pollTimer) startPoll();
+    }
+    if (canReloadAlertsFromServer() && Array.isArray(data.alerts)) {
+      const next = mapAlerts(data.alerts);
+      if (alertsFingerprint(next) !== alertsFingerprint(localAlerts)) {
+        localAlerts = next;
+        alertsDirty = false;
+        renderAlerts();
+      }
+    }
+    $("last-refresh").textContent =
+      "更新 " + new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    return data;
+  }
+
+  function stopPoll() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  function startPoll() {
+    stopPoll();
+    pollTimer = setInterval(function () {
+      loadLive().catch(function (e) {
+        if (e && e.message === "Unauthorized") {
+          stopPoll();
+          clearToken();
+          showTokenAuth();
+        }
+      });
+    }, pollMs);
   }
 
   async function loadAlerts(opts) {
@@ -415,39 +442,46 @@
 
   async function refreshAll() {
     try {
-      await refreshStatus();
-      if (canReloadAlertsFromServer()) {
-        await loadAlerts({ skipIfUnchanged: true });
-      }
+      await loadLive();
+      dataReady = true;
     } catch (e) {
       if (e.message === "Unauthorized") {
+        dataReady = false;
         clearToken();
-        showAuth();
+        showTokenAuth();
         return;
       }
       console.warn("refresh failed", e);
     }
   }
 
+  function warmupData() {
+    if (!getToken()) return Promise.resolve();
+    if (warmupPromise) return warmupPromise;
+    warmupPromise = refreshAll().finally(function () {
+      warmupPromise = null;
+    });
+    return warmupPromise;
+  }
+
+  function startWarmupAndPoll() {
+    if (!getToken()) return;
+    warmupData().finally(function () {
+      if (getToken() && document.visibilityState !== "hidden") startPoll();
+    });
+  }
+
   function onPageVisible() {
     if (!getToken()) return;
+    if (document.visibilityState === "hidden") {
+      stopPoll();
+      return;
+    }
     if ($("app-screen").classList.contains("hidden")) return;
     alertsDirty = false;
-    refreshAll().catch(function () {});
-  }
-
-  function startRefresh() {
-    stopRefresh();
-    refreshTimer = setInterval(() => {
-      refreshAll().catch(() => {});
-    }, REFRESH_MS);
-  }
-
-  function stopRefresh() {
-    if (refreshTimer) {
-      clearInterval(refreshTimer);
-      refreshTimer = null;
-    }
+    warmupData().finally(function () {
+      if (getToken()) startPoll();
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -527,9 +561,13 @@
       return;
     }
 
+    const armed = payload.filter((a) => a.enabled).length;
+    if (payload.length > 0 && armed === 0) {
+      if (!confirm("没有点「触发」的价格，EA 不会提醒。仍要保存吗？")) return;
+    }
+
     try {
       $("btn-save").disabled = true;
-      $("btn-clear").disabled = true;
       const data = await api("/api/alerts", {
         method: "POST",
         body: JSON.stringify({ alerts: payload, step }),
@@ -538,13 +576,11 @@
       alertsDirty = false;
       renderAlerts();
       setStepInput(step);
-      toast("设置已保存，已同步到 EA", "success");
-      await refreshStatus();
+      toast("设置已保存，EA 下次同步时取回", "success");
     } catch (e) {
       toast(e.message, "error");
     } finally {
       $("btn-save").disabled = false;
-      renderClearButton();
     }
   }
 
@@ -558,132 +594,42 @@
 
     try {
       $("btn-auto").disabled = true;
-      // Check EA online first for clearer UX
-      const status = await api("/api/status");
-      if (!status.ea_online) {
-        toast("EA当前离线，无法获取最新黄金价格。", "error");
+      if (!Number.isFinite(spotPrice) || spotPrice <= 0) {
+        toast("还没有 EA 价格", "error");
         return;
       }
 
       const data = await api("/api/alerts/auto", {
         method: "POST",
-        body: JSON.stringify({ step }),
+        body: JSON.stringify({ step, price: spotPrice }),
       });
       localAlerts = mapAlerts(data.alerts);
       alertsDirty = false;
       renderAlerts();
       setStepInput(data.step != null ? data.step : step);
       toast(data.message || "已生成，默认全部触发", "success");
-      await refreshStatus();
     } catch (e) {
-      if (e.code === "EA_OFFLINE" || (e.data && e.data.code === "EA_OFFLINE")) {
-        toast("EA当前离线，无法获取最新黄金价格。", "error");
-      } else {
-        toast(e.message, "error");
-      }
+      toast(e.message, "error");
     } finally {
       $("btn-auto").disabled = false;
     }
   }
 
-  async function pushCurrentAlerts(successMessage) {
-    collectAlertsFromDom();
-    const step = readStep();
-    if (!Number.isFinite(step) || step <= 0) {
-      toast("间隔必须是大于 0 的数字", "error");
-      return false;
-    }
-
-    const payload = [];
-    for (const a of localAlerts) {
-      const p = Number(a.price);
-      if (!Number.isFinite(p) || p <= 0) {
-        toast("存在无效价格：" + a.price, "error");
-        return false;
-      }
-      payload.push({
-        price: p,
-        enabled: !!a.enabled,
-        triggered: a.enabled ? 0 : a.triggered ? 1 : 0,
-      });
-    }
-
-    if (payload.length > MAX_ALERTS) {
-      toast("最多 " + MAX_ALERTS + " 个提醒", "error");
-      return false;
-    }
-    if (payload.length === 0) {
-      toast("暂无提醒", "error");
-      return false;
-    }
-
-    const data = await api("/api/alerts", {
-      method: "POST",
-      body: JSON.stringify({ alerts: payload, step }),
-    });
-    localAlerts = mapAlerts(data.alerts);
-    alertsDirty = false;
+  async function clearAll() {
+    if (!confirm("确定清除全部提醒？")) return;
+    localAlerts = [];
     renderAlerts();
-    setStepInput(step);
-    toast(successMessage, "success");
-    await refreshStatus();
-    return true;
-  }
-
-  async function clearOrRearm() {
-    collectAlertsFromDom();
-    if (localAlerts.length === 0) {
-      toast("暂无提醒", "error");
-      return;
-    }
-
-    const snapshot = localAlerts.map((a) => Object.assign({}, a));
-    const rearm = allDisarmed();
-    const btn = $("btn-clear");
-    btn.disabled = true;
-
     try {
-      if (rearm) {
-        const status = await api("/api/status");
-        const price = Number(status.price);
-        if (!Number.isFinite(price)) {
-          toast("无法获取当前价格", "error");
-          return;
-        }
-        $("current-price").textContent = formatPrice(price);
-        const keepOff = closestAlertIndex(localAlerts, price);
-        if (keepOff < 0) {
-          toast("存在无效价格", "error");
-          return;
-        }
-        localAlerts.forEach((a, i) => {
-          a.enabled = i !== keepOff;
-          if (a.enabled) a.triggered = false;
-        });
-      } else {
-        localAlerts.forEach((a) => {
-          a.enabled = false;
-        });
-      }
-
-      alertsDirty = true;
-      renderAlerts();
-      btn.disabled = true;
-      const ok = await pushCurrentAlerts(
-        rearm ? "已重新设定，已同步到 EA" : "已取消全部触发，已同步到 EA"
-      );
-      if (!ok) {
-        localAlerts = snapshot;
-        alertsDirty = false;
-        renderAlerts();
-      }
+      const step = readStep();
+      const savedStep = Number.isFinite(step) && step > 0 ? step : 5;
+      setStepInput(savedStep);
+      await api("/api/alerts", {
+        method: "POST",
+        body: JSON.stringify({ alerts: [], step: savedStep }),
+      });
+      toast("已全部清除", "success");
     } catch (e) {
-      localAlerts = snapshot;
-      alertsDirty = false;
-      renderAlerts();
       toast(e.message, "error");
-    } finally {
-      renderClearButton();
     }
   }
 
@@ -698,42 +644,28 @@
     });
     $("btn-logout").addEventListener("click", () => {
       clearToken();
-      showAuth();
+      $("token-input").value = "";
+      showTokenAuth();
     });
     $("btn-save").addEventListener("pointerdown", rememberStep);
     $("btn-save").addEventListener("click", saveAlerts);
     $("btn-auto").addEventListener("pointerdown", rememberStep);
     $("btn-auto").addEventListener("click", autoGenerate);
-    $("btn-clear").addEventListener("pointerdown", rememberStep);
-    $("btn-clear").addEventListener("click", clearOrRearm);
+    $("btn-clear").addEventListener("click", clearAll);
     $("step-input").addEventListener("change", rememberStep);
     $("btn-pause").addEventListener("click", togglePause);
-    document.addEventListener("visibilitychange", function () {
-      if (document.visibilityState === "visible") onPageVisible();
-    });
+    document.addEventListener("visibilitychange", onPageVisible);
     window.addEventListener("pageshow", onPageVisible);
   }
 
-  async function init() {
+  function init() {
     bindEvents();
-    const token = getToken();
-    if (!token) {
-      showAuth();
+    if (!getToken()) {
+      showTokenAuth();
       return;
     }
-    try {
-      await api("/api/status");
-      showApp();
-      await loadAlerts();
-    } catch {
-      clearToken();
-      showAuth();
-    }
+    enterApp();
   }
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", init);
-  } else {
-    init();
-  }
+  init();
 })();

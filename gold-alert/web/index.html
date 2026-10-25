@@ -6,25 +6,33 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#0a0a0a" />
+  <meta name="apple-mobile-web-app-title" content="GOLD ALERT" />
   <title>GOLD ALERT</title>
-  <link rel="stylesheet" href="/style.css?v=15" />
+  <link rel="icon" href="/icon.jpg" type="image/jpeg" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/style.css?v=32" />
 </head>
 <body>
-  <!-- Token unlock screen (token never hardcoded) -->
+  <!-- Token unlock screen (API token never hardcoded) -->
   <div id="auth-screen" class="screen">
     <div class="auth-box">
-      <h1 class="brand">GOLD ALERT</h1>
-      <p class="auth-hint">输入 API Token，当天只需一次</p>
-      <input
-        id="token-input"
-        type="text"
-        autocomplete="off"
-        autocapitalize="off"
-        spellcheck="false"
-        placeholder="API Token"
-        class="input"
-      />
-      <button id="btn-unlock" class="btn btn-primary btn-block">解锁</button>
+      <div class="brand-lockup brand-lockup-auth">
+        <img src="/icon.jpg" alt="" class="brand-icon brand-icon-lg" />
+        <h1 class="brand">GOLD ALERT</h1>
+      </div>
+      <p id="auth-hint" class="auth-hint">新设备输入一次 Token，本机以后不用再输入</p>
+      <div id="token-panel">
+        <input
+          id="token-input"
+          type="password"
+          autocomplete="current-password"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="API Token"
+          class="input"
+        />
+        <button id="btn-unlock" class="btn btn-primary btn-block" type="button">解锁</button>
+      </div>
       <p id="auth-error" class="error-msg hidden"></p>
     </div>
   </div>
@@ -32,21 +40,20 @@
   <!-- Main app -->
   <div id="app-screen" class="screen hidden">
     <header class="header">
-      <h1 class="brand">GOLD ALERT</h1>
+      <div class="brand-lockup">
+        <img src="/icon.jpg" alt="" class="brand-icon" />
+        <h1 class="brand">GOLD ALERT</h1>
+      </div>
       <button id="btn-logout" class="btn-ghost" type="button" title="清除 Token">退出</button>
     </header>
 
     <section class="hero-price">
       <div class="symbol" id="symbol">XAUUSD</div>
-      <div class="label">当前价格</div>
+      <div class="label" id="price-label">当前价格</div>
       <div class="price" id="current-price">--</div>
       <div class="bid-ask">
         <span>Bid <strong id="bid">--</strong></span>
         <span>Ask <strong id="ask">--</strong></span>
-      </div>
-      <div id="ea-status" class="ea-status offline">
-        <span class="dot"></span>
-        <span id="ea-status-text">EA 离线</span>
       </div>
     </section>
 
@@ -66,21 +73,21 @@
     </section>
 
     <section class="actions actions-save">
-      <button id="btn-clear" class="btn btn-danger" type="button">清除</button>
+      <button id="btn-clear" class="btn btn-danger" type="button">全部清除</button>
       <button id="btn-save" class="btn btn-primary" type="button">保存设置</button>
     </section>
 
     <section class="panel">
       <div class="panel-title-row">
         <h2 class="panel-title">提醒价格</h2>
-        <span id="alerts-count" class="count-badge">触发 0 / 11</span>
+        <span id="alerts-count" class="count-badge">触发 0 / 15</span>
       </div>
-      <p class="panel-hint">不需要的点成「关闭」再保存。清除会取消全部触发并同步给 EA</p>
+      <p class="panel-hint">设定后默认全部触发。不需要的点成「关闭」，再保存</p>
       <ul id="alerts-list" class="alerts-list"></ul>
     </section>
 
     <section class="actions actions-bottom">
-      <button id="btn-pause" class="btn btn-pause" type="button">暂停提醒</button>
+      <button id="btn-pause" class="btn btn-pause btn-block" type="button">暂停提醒</button>
     </section>
 
     <div id="toast" class="toast hidden"></div>
@@ -89,6 +96,6 @@
     </footer>
   </div>
 
-  <script src="/app.js?v=15"></script>
+  <script src="/app.js?v=32"></script>
 </body>
 </html>
