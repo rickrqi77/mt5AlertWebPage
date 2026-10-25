@@ -42,5 +42,5 @@ Safari 打开 https://w77.tail708c1b.ts.net/ ，在列表里点 **Safari 安装*
 | `OTA_SITE_DIR` | `/mnt/d/ota-site` |
 | `OTA_BASE_URL` | `https://w77.tail708c1b.ts.net` |
 | `OTA_SLUG` | `goldalert` |
-| `OTA_TITLE` | `GOLD ALERT` |
+| `OTA_TITLE` | `提醒事项` |
 | `ADHOC_DIR` | `/mnt/d/goldalert/adhoc` |
