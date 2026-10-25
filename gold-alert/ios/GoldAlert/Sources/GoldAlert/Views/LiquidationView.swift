@@ -2,15 +2,11 @@ import SwiftUI
 
 struct LiquidationView: View {
     @StateObject private var model = LiquidationViewModel()
-    @AppStorage("liquidationCollapsed") private var collapsed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             headerRow
-
-            if !collapsed {
-                expandedBody
-            }
+            contentBody
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
@@ -33,28 +29,21 @@ struct LiquidationView: View {
     }
 
     private var headerRow: some View {
-        Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                collapsed.toggle()
-            }
-        } label: {
-            HStack(spacing: 10) {
+        ZStack {
+            Text(model.mode.rawValue)
+                .font(.headline)
+                .foregroundStyle(Color.white.opacity(0.55))
+
+            HStack {
                 Text("最终价")
                     .font(.headline)
                     .foregroundStyle(.white)
-                Text(model.mode.rawValue)
-                    .font(.subheadline)
-                    .foregroundStyle(Color.white.opacity(0.55))
-                Spacer()
-                Image(systemName: collapsed ? "chevron.down" : "chevron.up")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.white.opacity(0.55))
+                Spacer(minLength: 0)
             }
         }
-        .buttonStyle(.plain)
     }
 
-    private var expandedBody: some View {
+    private var contentBody: some View {
         VStack(alignment: .leading, spacing: 12) {
             Button {
                 Task { await model.readLatestScreenshotAndCalculate() }
