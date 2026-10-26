@@ -332,6 +332,9 @@ final class AppViewModel: ObservableObject {
 
     func updatePrice(at index: Int, text: String) {
         guard alerts.indices.contains(index) else { return }
+        // 行视图 onAppear 会回显一次相同价格，此时不应标记 dirty；
+        // 只有用户真正改了价格才标记，避免云端刷新被挡住、已触发状态无法更新。
+        guard alerts[index].priceText != text else { return }
         alerts[index].priceText = text
         alertsDirty = true
     }
