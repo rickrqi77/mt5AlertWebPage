@@ -1,6 +1,16 @@
 import Foundation
 import SwiftUI
 
+/// 实时价格来源（ren 2026-10-28 要求在「提醒事项」菜单里可选）：
+/// EA = 用 EA 推送到服务器的价格；Swiss = 直接取 Swissquote 的 XAU/USD 报价。
+/// 选定后持久化，下次打开默认沿用。
+enum PriceSource: String, CaseIterable, Identifiable {
+    case ea = "EA"
+    case swiss = "Swiss"
+
+    var id: String { rawValue }
+}
+
 @MainActor
 final class AppViewModel: ObservableObject {
     static let maxAlerts = 15
@@ -23,11 +33,18 @@ final class AppViewModel: ObservableObject {
 
     private var token = KeychainStore.readToken()
     private var baseURL = KeychainStore.readBaseURL()
-    /// EA 推送到服务器、由 /api/status 带回的价格——价格的唯一来源（不再用 Swissquote 金价）。
-    @Published private(set) var eaPrice: Double = 0
+    private static let priceSourceKey = "priceSource"
 
-    /// 画面显示与生成网格用的当前价：完全用 EA 推送价（尚无推送时为 0，画面显示 --）。
-    var displayPrice: Double { eaPrice }
+    /// EA 推送到服务器、由 /api/status 带回的价格。
+    @Published private(set) var eaPrice: Double = 0
+    /// Swissquote 的 XAU/USD 报价（选 Swiss 来源时用，3 秒轮询刷新）。
+    @Published private(set) var swissPrice: Double = 0
+    /// 当前实时价格来源（「提醒事项」菜单里切换，持久化）。
+    @Published var priceSource: PriceSource = .ea
+
+    /// 画面显示与生成网格用的当前价：按所选来源取 EA 推送价或 Swiss 报价
+    ///（尚无价格时为 0，画面显示 --）。
+    var displayPrice: Double { priceSource == .ea ? eaPrice : swissPrice }
     private var cloudTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
     private var doneFlashTask: Task<Void, Never>?
@@ -38,6 +55,10 @@ final class AppViewModel: ObservableObject {
     var armedCount: Int { alerts.filter(\.enabled).count }
 
     init() {
+        if let raw = UserDefaults.standard.string(forKey: Self.priceSourceKey),
+           let saved = PriceSource(rawValue: raw) {
+            priceSource = saved
+        }
         if !token.isEmpty {
             isUnlocked = true
         }
@@ -92,6 +113,7 @@ final class AppViewModel: ObservableObject {
         tokenInput = ""
         alerts = []
         eaPrice = 0
+        swissPrice = 0
         isUnlocked = false
         authError = nil
         LocalCache.clear()
@@ -99,14 +121,37 @@ final class AppViewModel: ObservableObject {
 
     func startLoops() {
         stopLoops()
-        Task { await refreshCloudState() }
+        Task {
+            await refreshCloudState()
+            await refreshSwissPrice()
+        }
         // 定时刷新云端状态：EA 推送价格、在线小圆点（连上后变绿）、已触发的行变成“已用”。
+        // 价格来源选的是 Swiss 时，同一周期里顺带刷新 Swissquote 报价。
         let cloudNanos = UInt64(Self.cloudPollSeconds * 1_000_000_000)
         cloudTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: cloudNanos)
                 await self?.refreshCloudState()
+                await self?.refreshSwissPrice()
             }
+        }
+    }
+
+    /// 「提醒事项」菜单里切换实时价格来源：设定后持久化，下次打开默认沿用；
+    /// 切到 Swiss 时立刻取一次报价，不等下一个轮询周期。
+    func setPriceSource(_ source: PriceSource) {
+        priceSource = source
+        UserDefaults.standard.set(source.rawValue, forKey: Self.priceSourceKey)
+        if source == .swiss {
+            Task { await refreshSwissPrice() }
+        }
+    }
+
+    /// 刷新 Swissquote 黄金报价（仅来源选 Swiss 时才取）；失败静默、保留上次的值。
+    func refreshSwissPrice() async {
+        guard priceSource == .swiss else { return }
+        if let quote = try? await SwissquoteClient.shared.fetchQuote(), quote.price > 0 {
+            swissPrice = quote.price
         }
     }
 
@@ -178,7 +223,7 @@ final class AppViewModel: ObservableObject {
     /// 行按位置（.id(index)）复用 + 行内 @State 价格草稿残留同行号旧值。
     /// 现已拆除草稿——价格直接显示模型值，行身份统一用 AlertItem.rowKey。）
     ///
-    /// 间隔逻辑（ren 定版）：先确定当前 EA 价格的整数部分（只取整数、小数直接舍去，
+    /// 间隔逻辑（ren 定版）：先确定当前显示价格（来源可选 EA/Swiss）的整数部分（只取整数、小数直接舍去，
     /// 不是四舍五入），以这个整数为起点，往小按间隔设 7 个、往大按间隔设 7 个，
     /// 加上起点本身共 15 个；全部设完后按价格升序排序显示。
     /// 除起点外其余全部设为有效（触发），起点设为关闭（现价就在该点附近，避免立即触发）。
@@ -189,7 +234,7 @@ final class AppViewModel: ObservableObject {
     /// 后台轮询不许用服务器上的旧设定盖掉画面刚显示的新网格。
     /// 推送失败时画面不回退：新网格继续留在画面上、保持锁定，用户可点「保存」重试。
     ///
-    /// 「立刻刷新」的关键：定价直接用画面上正在显示的 EA 价格（eaPrice 本来就由
+    /// 「立刻刷新」的关键：定价直接用画面上正在显示的价格（displayPrice 按所选来源取 EA 推送价或 Swiss 报价，本来就由
     /// 3 秒轮询保持最新），算网格、换列表全部在第一个 await 之前同步完成——
     /// 旧版先 await 一次网络刷新才换列表，画面要等网络回来才动，
     /// 看起来就像等到下一次价格更新才刷新（ren 21:35 实测反馈）。
@@ -203,18 +248,23 @@ final class AppViewModel: ObservableObject {
         defer { busy = false }
         alertsDirty = true
 
-        // 价格就此定下：用画面当前显示的 EA 推送价，不先等网络。
-        var price = eaPrice
+        // 价格就此定下：用画面当前显示的价格（按所选来源：EA 推送价或 Swiss 报价），
+        // 不先等网络。
+        var price = displayPrice
         if price <= 0 {
-            // 只有 EA 还从未推过价（画面显示 --）时，才去服务器现取一次兜底。
-            await refreshCloudState()
-            price = eaPrice
+            // 只有当前来源还从未取到过价（画面显示 --）时，才现取一次兜底。
+            if priceSource == .ea {
+                await refreshCloudState()
+            } else {
+                await refreshSwissPrice()
+            }
+            price = displayPrice
         }
         guard price > 0 else {
             alertsDirty = wasDirty
             step = previousStep
             persistState()
-            showToast("还没有 EA 价格", error: true)
+            showToast(priceSource == .ea ? "还没有 EA 价格" : "还没有 Swiss 价格", error: true)
             return
         }
 

@@ -66,17 +66,33 @@ struct MainView: View {
 
     private var header: some View {
         HStack {
-            // 点左上「提醒事项」弹出菜单：切换最终价的计算模式（日元/美元）。
-            // 模式设定后会记住，下次打开画面默认就是这个模式。
+            // 点左上「提醒事项」弹出菜单：切换最终价的计算模式（日元/美元），
+            // 以及实时价格来源（EA 推送价 / Swiss 报价）。两项设定都会记住，
+            // 下次打开画面默认沿用。
             Menu {
-                ForEach(LiquidationMode.allCases) { mode in
-                    Button {
-                        Task { await liquidation.switchMode(mode) }
-                    } label: {
-                        if mode == liquidation.mode {
-                            Label(mode.rawValue, systemImage: "checkmark")
-                        } else {
-                            Text(mode.rawValue)
+                Section("最终价模式") {
+                    ForEach(LiquidationMode.allCases) { mode in
+                        Button {
+                            Task { await liquidation.switchMode(mode) }
+                        } label: {
+                            if mode == liquidation.mode {
+                                Label(mode.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(mode.rawValue)
+                            }
+                        }
+                    }
+                }
+                Section("实时价格来源") {
+                    ForEach(PriceSource.allCases) { source in
+                        Button {
+                            model.setPriceSource(source)
+                        } label: {
+                            if source == model.priceSource {
+                                Label(source.rawValue, systemImage: "checkmark")
+                            } else {
+                                Text(source.rawValue)
+                            }
                         }
                     }
                 }
@@ -91,7 +107,7 @@ struct MainView: View {
                 }
             }
             .buttonStyle(.plain)
-            .accessibilityHint("点按切换最终价计算模式（日元/美元）")
+            .accessibilityHint("点按切换最终价计算模式（日元/美元）与实时价格来源（EA/Swiss）")
 
             Spacer()
             // 右上角不放「退出」按钮（ren 21:54 要求去掉）；退出登录逻辑本身保留，
@@ -102,7 +118,7 @@ struct MainView: View {
     private var priceHero: some View {
         VStack(spacing: 3) {
             // 不再单独占一行显示 XAUUSD：只剩价格行，接通状态点（绿/红）放在价格右边。
-            // 价格完全按 EA 推送显示，不可点击（已取消点价格改刷新间隔的功能）。
+            // 价格按所选来源显示（EA 推送价或 Swiss 报价），不可点击（已取消点价格改刷新间隔的功能）。
             ZStack {
                 // 实时价格只按数字本身居中（圆点不参与居中计算）：
                 // Text 作为 ZStack 直接子视图被居中，圆点用 overlay 贴在数字
