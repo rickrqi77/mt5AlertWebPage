@@ -24,6 +24,11 @@ final class LiquidationViewModel: ObservableObject {
     /// 持仓方向（最近截图解析的全部持仓同为 buy 或同为 sell 时才有值）：
     /// 每行盈亏数字在 sell 时要再乘 −1（ren 定版公式）。混仓或无数据为 nil（不翻转）。
     @Published private(set) var positionSide: PositionSide?
+    /// 所有开单的平均价（按手数加权，与最终价计算用的平均价同一个，
+    /// 来自最近截图解析并持久化）：每行盈亏公式的被减基准就是它——
+    /// ren 22:59 明确纠正：公式里原来写「实时价格」的地方应该是这个平均价。
+    /// 无持仓数据为 0。
+    @Published private(set) var averageEntry: Double
 
     init() {
         // 默认美元模式；用户设定过模式则以下次打开仍用上次设定的（modeKey 持久化）。
@@ -37,6 +42,7 @@ final class LiquidationViewModel: ObservableObject {
         totalLots = Self.loadTradeData()?.totalLots ?? 0
         usdJpyRate = UserDefaults.standard.object(forKey: Self.usdJpyRateKey) as? Double ?? 0
         positionSide = Self.loadTradeData()?.side
+        averageEntry = Self.loadTradeData()?.averageEntry ?? 0
     }
 
     /// 刷新美日实时汇率（日元模式下每行盈亏数字要用）；失败静默、保留上次的值。
@@ -100,6 +106,7 @@ final class LiquidationViewModel: ObservableObject {
             Self.saveTradeData(data)
             totalLots = data.totalLots
             positionSide = data.side
+            averageEntry = data.averageEntry
 
             let calculated = try await Self.calculate(mode: mode, data: data)
             applyResult(calculated)
@@ -118,6 +125,7 @@ final class LiquidationViewModel: ObservableObject {
         UserDefaults.standard.set(calculated.liquidationPrice, forKey: Self.lastPriceKey)
         totalLots = calculated.totalLots
         positionSide = calculated.side
+        averageEntry = calculated.averagePrice
         // 日元模式计算时用的汇率一并留住，供每行盈亏数字换算。
         if let rate = calculated.usdJpyRate, rate > 0 {
             usdJpyRate = rate
