@@ -211,31 +211,27 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// 间隔下拉改动后立刻生效，固定流程：先自动清除、再生成（ren 实测确认的正确顺序）：
-    /// 在旧设定上直接生成不生效——必须先把本地现有设定清空，
-    /// 再按新间隔 + 当前价生成新网格（原「设定」按钮的动作），生成结果随即保存到服务器。
-    /// 注意：清除只清本地、不往服务器推空表——否则 EA 会先收到一次空设定、随后又收到新设定，
-    /// 白白多同步一次；整个改间隔过程只在生成完成后推送一次最终结果。
+    /// 间隔下拉改动后立刻生效：整个过程在后台进行，画面上的旧列表保持不动，
+    /// 新数据全部整理好后一次性替换显示——不出现先清空、再逐行冒出来的割裂感。
+    /// 生成顺序仍是「先清除（逻辑上不再沿用旧设定）、再生成」：生成请求不依赖旧列表，
+    /// 且全程锁定列表不让轮询插手；服务器只在最后收到一次最终结果（不推空表）。
     func applyStep(_ value: Double) async {
         step = value
         persistState()
-        busy = true
-        defer { busy = false }
-        clearLocalAlertsForRegenerate()
         await autoGenerate()
-    }
-
-    /// 改间隔专用清除：只清空本地列表并锁定（轮询不许用服务器旧设定盖回），不推送空表到服务器。
-    private func clearLocalAlertsForRegenerate() {
-        alerts = []
-        alertsDirty = true
-        persistState()
     }
 
     func autoGenerate() async {
         // 先把要用的间隔定住：下面兜底刷新云端状态时可能用服务器旧值覆盖 step，
         // 生成请求必须用用户刚选的这个值，不能被覆盖掉。
         let stepToUse = step
+        let wasDirty = alertsDirty
+        busy = true
+        defer { busy = false }
+        // 全程锁定列表（alertsDirty=true）：轮询不许动 alerts，画面保持旧列表原样，
+        // 直到最后一次性替换。busy 同时挡住轮询用旧 step 覆盖新间隔。
+        alertsDirty = true
+
         // 建网格用的价格：先现货价；取不到就先刷新一次，再用服务器带回的 EA 价格兜底
         //（网页版「设定」用的正是 /api/status 的 EA 价格）。都没有才提示。
         var price = quote.price
@@ -248,16 +244,14 @@ final class AppViewModel: ObservableObject {
             price = lastEAStatusPrice
         }
         guard price > 0 else {
+            alertsDirty = wasDirty
             showToast("还没有现货价格", error: true)
             return
         }
-        busy = true
-        defer { busy = false }
-        // 生成全程把列表锁住（alertsDirty=true）：3 秒一次的云端轮询在此期间
-        // 不许用服务器上的旧设定盖掉正在生成/刚生成的新列表——此前有设定时改间隔
-        // 看似没反应，就是新列表生成后又被轮询并发的旧数据盖回（清空后无旧数据可盖，才偶尔看似有效）。
-        let wasDirty = alertsDirty
-        alertsDirty = true
+
+        // 第一步：后台生成新网格（不碰画面上的 alerts）。
+        let generated: [AlertItem]
+        let generatedStep: Double
         do {
             let data = try await CloudflareClient.shared.autoGenerate(
                 baseURL: baseURL,
@@ -265,33 +259,37 @@ final class AppViewModel: ObservableObject {
                 step: stepToUse,
                 price: price
             )
-            alerts = (data.alerts ?? []).map { $0.asItem() }
-            if let s = data.step, s > 0 { step = s } else { step = stepToUse }
+            generated = (data.alerts ?? []).map { $0.asItem() }
+            if let s = data.step, s > 0 { generatedStep = s } else { generatedStep = stepToUse }
         } catch {
             alertsDirty = wasDirty
             showToast(error.localizedDescription, error: true)
             return
         }
-        // 紧接着把生成结果保存到服务器（等同于生成后再点一次「保存」），确保网站/EA
+
+        // 第二步：把生成结果保存到服务器（等同于生成后再点一次「保存」），确保网站/EA
         // 一定拿到新设定，不依赖 /api/alerts/auto 本身是否落库。
         do {
             let saved = try await CloudflareClient.shared.saveAlerts(
                 baseURL: baseURL,
                 token: token,
-                alerts: alerts,
-                step: step
+                alerts: generated,
+                step: generatedStep
             )
-            if let savedAlerts = saved.alerts {
-                alerts = savedAlerts.map { $0.asItem() }
-            }
+            // 全部就绪——一次性替换显示（整个流程里唯一改动 alerts 的地方）。
+            alerts = (saved.alerts ?? []).map { $0.asItem() }
+            if alerts.isEmpty { alerts = generated }
+            step = generatedStep
             alertsDirty = false
             persistState()
             flashDone()
         } catch {
-            // 生成结果已在本地显示；保存没成功就保持列表锁定（轮询不盖回），
+            // 保存失败：新网格已生成，仍一次性替换显示并保持锁定（轮询不盖回），
             // 提示用户可再点「保存」推送到网站。
-            showToast("已生成，但保存到网站失败：\(error.localizedDescription)", error: true)
+            alerts = generated
+            step = generatedStep
             persistState()
+            showToast("已生成，但保存到网站失败：\(error.localizedDescription)", error: true)
         }
     }
 
