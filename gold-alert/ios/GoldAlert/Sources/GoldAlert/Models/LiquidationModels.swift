@@ -7,19 +7,19 @@ enum LiquidationMode: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
 }
 
-enum PositionSide: String, Sendable {
+enum PositionSide: String, Sendable, Codable {
     case buy
     case sell
 }
 
-struct GoldPosition: Equatable, Sendable {
+struct GoldPosition: Equatable, Sendable, Codable {
     var symbol: String
     var side: PositionSide
     var lots: Double
     var entryPrice: Double
 }
 
-struct ScreenshotTradeData: Equatable, Sendable {
+struct ScreenshotTradeData: Equatable, Sendable, Codable {
     var balance: Double
     var margin: Double
     var positions: [GoldPosition]

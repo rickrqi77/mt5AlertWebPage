@@ -64,14 +64,32 @@ struct MainView: View {
 
     private var header: some View {
         HStack {
-            HStack(spacing: 8) {
-                Image(systemName: "bell.badge.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(Color(red: 0.9, green: 0.25, blue: 0.22))
-                Text("提醒事项")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+            // 点左上「提醒事项」弹出菜单：切换最终价的计算模式（日元/美元）。
+            // 模式设定后会记住，下次打开画面默认就是这个模式。
+            Menu {
+                ForEach(LiquidationMode.allCases) { mode in
+                    Button {
+                        Task { await liquidation.switchMode(mode) }
+                    } label: {
+                        if mode == liquidation.mode {
+                            Label(mode.rawValue, systemImage: "checkmark")
+                        } else {
+                            Text(mode.rawValue)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "bell.badge.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Color(red: 0.9, green: 0.25, blue: 0.22))
+                    Text("提醒事项")
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityHint("点按切换最终价计算模式（日元/美元）")
 
             Spacer()
             Button("退出") { model.logout() }
@@ -82,27 +100,23 @@ struct MainView: View {
 
     private var priceHero: some View {
         VStack(spacing: 3) {
-            HStack(spacing: 6) {
-                Text(model.quote.symbol.isEmpty ? "XAUUSD" : model.quote.symbol)
-                    .font(.caption)
-                    .tracking(2)
-                    .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09).opacity(0.85))
-                Circle()
-                    .fill(model.eaOnline
-                          ? Color(red: 0.3, green: 0.75, blue: 0.45)
-                          : Color(red: 0.9, green: 0.3, blue: 0.28))
-                    .frame(width: 8, height: 8)
-                    .accessibilityLabel(model.eaOnline ? "EA 在线" : "EA 离线")
-            }
-
+            // 不再单独占一行显示 XAUUSD：只剩价格行，接通状态点（绿/红）放在价格右边。
             ZStack {
                 Button {
                     showPollPicker = true
                 } label: {
-                    Text(format(model.quote.price))
-                        .font(.system(size: 32, weight: .bold).monospacedDigit())
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
+                    HStack(spacing: 8) {
+                        Text(format(model.quote.price))
+                            .font(.system(size: 32, weight: .bold).monospacedDigit())
+                            .foregroundStyle(.white)
+                        Circle()
+                            .fill(model.eaOnline
+                                  ? Color(red: 0.3, green: 0.75, blue: 0.45)
+                                  : Color(red: 0.9, green: 0.3, blue: 0.28))
+                            .frame(width: 9, height: 9)
+                            .accessibilityLabel(model.eaOnline ? "EA 在线" : "EA 离线")
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("点按设置价格刷新间隔")
@@ -129,16 +143,13 @@ struct MainView: View {
                 }
             }
 
-            // 最终价：比实时价小一号，显示在实时价正下方。
-            // 从未计算成功过显示 0；成功过则默认显示上次结果，读到新图算成功才刷新。
-            HStack(spacing: 6) {
-                Text("最终价")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(Color.white.opacity(0.55))
-                Text(formatFinalPrice(liquidation.displayedLiquidationPrice))
-                    .font(.system(size: 24, weight: .bold).monospacedDigit())
-                    .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
-            }
+            // 最终价：不带文字标签，只显示价格本身（计算结果最后一步的值），居中，
+            // 比实时价小一号。从未计算成功过显示 0；成功过则默认显示上次结果，
+            // 读到新图算成功才刷新。
+            Text(formatFinalPrice(liquidation.displayedLiquidationPrice))
+                .font(.system(size: 24, weight: .bold).monospacedDigit())
+                .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+                .frame(maxWidth: .infinity, alignment: .center)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)

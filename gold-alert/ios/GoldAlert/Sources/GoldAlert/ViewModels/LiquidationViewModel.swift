@@ -7,6 +7,7 @@ final class LiquidationViewModel: ObservableObject {
     private static let modeKey = "liquidationMode"
     private static let lastPriceKey = "lastLiquidationPrice_v1"
     private static let processedAssetKey = "lastProcessedScreenshotID_v1"
+    private static let tradeDataKey = "lastScreenshotTradeData_v1"
 
     @Published var mode: LiquidationMode
     @Published var busy = false
@@ -15,32 +16,42 @@ final class LiquidationViewModel: ObservableObject {
     @Published private(set) var lastLiquidationPrice: Double
 
     init() {
+        // 默认美元模式；用户设定过模式则以下次打开仍用上次设定的（modeKey 持久化）。
         if let raw = UserDefaults.standard.string(forKey: Self.modeKey),
            let saved = LiquidationMode(rawValue: raw) {
             mode = saved
         } else {
-            mode = .jpy
+            mode = .usd
         }
         lastLiquidationPrice = UserDefaults.standard.object(forKey: Self.lastPriceKey) as? Double ?? 0
     }
 
     /// 画面实时价下方显示的最终价：本次算出新的用新的，否则显示上次结果（无则 0）。
+    /// 注意取的是计算结果的最后一步 liquidationPrice（最终价），不是平均价 averagePrice。
     var displayedLiquidationPrice: Double {
         result?.liquidationPrice ?? lastLiquidationPrice
     }
 
-    func setMode(_ newMode: LiquidationMode) {
+    /// 点「提醒事项」弹菜单切换日元/美元模式：设定后持久化，下次打开默认就是这个模式。
+    /// 切换后立刻按新模式的公式、基于上次截图解析出的持仓数据重算最终价；
+    /// 没有可用的持仓数据时回到 0，并放行最新截图让后续自动计算按新模式处理。
+    func switchMode(_ newMode: LiquidationMode) async {
         guard mode != newMode else { return }
         mode = newMode
         UserDefaults.standard.set(newMode.rawValue, forKey: Self.modeKey)
-        // Previous result used the other formula — clear until recalculated.
         result = nil
-        lastLiquidationPrice = 0
-        UserDefaults.standard.removeObject(forKey: Self.lastPriceKey)
-    }
 
-    func toggleMode() {
-        setMode(mode == .jpy ? .usd : .jpy)
+        if let data = Self.loadTradeData() {
+            if let calculated = try? await Self.calculate(mode: newMode, data: data) {
+                applyResult(calculated)
+            }
+            // 重算失败（如汇率取不到）时静默保留旧显示值，等下次成功计算再刷新。
+        } else {
+            lastLiquidationPrice = 0
+            UserDefaults.standard.removeObject(forKey: Self.lastPriceKey)
+            UserDefaults.standard.removeObject(forKey: Self.processedAssetKey)
+            await autoCalculateFromLatestScreenshot()
+        }
     }
 
     /// 画面打开时自动调用：默认去截图相册找最后一张图片并计算最终价，不需点任何按钮。
@@ -64,17 +75,11 @@ final class LiquidationViewModel: ObservableObject {
             let image = try await PhotoLibraryService.loadImage(from: asset)
             let ocr = try await PhotoLibraryService.recognizeText(in: image)
             let data = try MT5ScreenshotParser.parse(ocrText: ocr)
-            let calculated: LiquidationResult
-            switch mode {
-            case .jpy:
-                let usdJpy = try await SwissquoteClient.shared.fetchUSDJPY()
-                calculated = try LiquidationCalculator.calculateJPY(data: data, usdJpyRate: usdJpy)
-            case .usd:
-                calculated = try LiquidationCalculator.calculateUSD(data: data)
-            }
-            result = calculated
-            lastLiquidationPrice = calculated.liquidationPrice
-            UserDefaults.standard.set(calculated.liquidationPrice, forKey: Self.lastPriceKey)
+            // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
+            Self.saveTradeData(data)
+
+            let calculated = try await Self.calculate(mode: mode, data: data)
+            applyResult(calculated)
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
 
             // 删除已用截图；失败也静默（结果已保存，下次打开靠 processedAssetKey 跳过）。
@@ -82,5 +87,32 @@ final class LiquidationViewModel: ObservableObject {
         } catch {
             // 静默：不提示、不清旧结果。
         }
+    }
+
+    private func applyResult(_ calculated: LiquidationResult) {
+        result = calculated
+        lastLiquidationPrice = calculated.liquidationPrice
+        UserDefaults.standard.set(calculated.liquidationPrice, forKey: Self.lastPriceKey)
+    }
+
+    private static func calculate(mode: LiquidationMode, data: ScreenshotTradeData) async throws -> LiquidationResult {
+        switch mode {
+        case .jpy:
+            let usdJpy = try await SwissquoteClient.shared.fetchUSDJPY()
+            return try LiquidationCalculator.calculateJPY(data: data, usdJpyRate: usdJpy)
+        case .usd:
+            return try LiquidationCalculator.calculateUSD(data: data)
+        }
+    }
+
+    private static func saveTradeData(_ data: ScreenshotTradeData) {
+        if let encoded = try? JSONEncoder().encode(data) {
+            UserDefaults.standard.set(encoded, forKey: tradeDataKey)
+        }
+    }
+
+    private static func loadTradeData() -> ScreenshotTradeData? {
+        guard let stored = UserDefaults.standard.data(forKey: tradeDataKey) else { return nil }
+        return try? JSONDecoder().decode(ScreenshotTradeData.self, from: stored)
     }
 }

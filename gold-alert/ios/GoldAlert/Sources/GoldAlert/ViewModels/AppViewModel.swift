@@ -28,6 +28,9 @@ final class AppViewModel: ObservableObject {
 
     private var token = KeychainStore.readToken()
     private var baseURL = KeychainStore.readBaseURL()
+    /// 服务器 /api/status 带回的 EA 价格（与网页版「设定」用的 spotPrice 同源），
+    /// 现货报价取不到时生成提醒网格用它兜底。
+    private var lastEAStatusPrice: Double = 0
     private var priceTask: Task<Void, Never>?
     private var cloudTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
@@ -183,7 +186,9 @@ final class AppViewModel: ObservableObject {
             let remote = try await alertsReq
             eaOnline = status.ea_online == true
             alertsPaused = status.paused == true || status.alerts_enabled == false
-            if let s = status.step, s > 0 { step = s }
+            if let p = status.price, p > 0 { lastEAStatusPrice = p }
+            // 生成/保存进行中不要用服务器的旧 step 覆盖用户刚选的新间隔。
+            if !busy, let s = status.step, s > 0 { step = s }
             if !alertsDirty {
                 let existing = alerts
                 alerts = remote.alerts.map { dto in
@@ -206,33 +211,45 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// 间隔下拉改动后立刻生效：更新间隔，并按当前价重新生成提醒网格（原「设定」按钮的动作）。
-    /// 尚无现货价时只先记住间隔，等有价格后用户再改动即会生成，不弹错误提示。
+    /// 间隔下拉改动后立刻生效：更新间隔，并按当前价重新生成提醒网格（原「设定」按钮的动作），
+    /// 生成结果由服务器保存，下方提醒随之更新、网站同步。失败会弹提示，不静默。
     func applyStep(_ value: Double) async {
         step = value
         persistState()
-        guard quote.isValid else { return }
         await autoGenerate()
     }
 
     func autoGenerate() async {
-        guard quote.isValid else {
+        // 先把要用的间隔定住：下面兜底刷新云端状态时可能用服务器旧值覆盖 step，
+        // 生成请求必须用用户刚选的这个值，不能被覆盖掉。
+        let stepToUse = step
+        // 建网格用的价格：先现货价；取不到就先刷新一次，再用服务器带回的 EA 价格兜底
+        //（网页版「设定」用的正是 /api/status 的 EA 价格）。都没有才提示。
+        var price = quote.price
+        if !quote.isValid {
+            await refreshSwissquote()
+            price = quote.price
+        }
+        if price <= 0 {
+            await refreshCloudState()
+            price = lastEAStatusPrice
+        }
+        guard price > 0 else {
             showToast("还没有现货价格", error: true)
             return
         }
         busy = true
         defer { busy = false }
         do {
-            // Auto uses local Swissquote mid only to build the grid; EA still owns live price.
             let data = try await CloudflareClient.shared.autoGenerate(
                 baseURL: baseURL,
                 token: token,
-                step: step,
-                price: quote.price
+                step: stepToUse,
+                price: price
             )
             alerts = (data.alerts ?? []).map { $0.asItem() }
             alertsDirty = false
-            if let s = data.step, s > 0 { step = s }
+            if let s = data.step, s > 0 { step = s } else { step = stepToUse }
             persistState()
             flashDone()
         } catch {
