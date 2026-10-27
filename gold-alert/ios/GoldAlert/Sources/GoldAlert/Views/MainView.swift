@@ -72,7 +72,7 @@ struct MainView: View {
     private var header: some View {
         HStack {
             // 点左上「提醒事项」弹出菜单：切换最终价的计算模式（日元/美元），
-            // 以及实时价格来源（EA 推送价 / Swiss 报价）。两项设定都会记住，
+            // 以及实时价格来源（EA 推送价 / Swiss 报价），还有暂停/恢复提醒。两项设定都会记住，
             // 下次打开画面默认沿用。
             Menu {
                 Section("最终价模式") {
@@ -100,6 +100,18 @@ struct MainView: View {
                             }
                         }
                     }
+                }
+                // 暂停/恢复提醒：原画面右上按钮移到这里（ren 2026-10-28）。
+                Section {
+                    Button {
+                        Task { await model.togglePause() }
+                    } label: {
+                        Label(
+                            model.alertsPaused ? "恢复提醒" : "暂停提醒",
+                            systemImage: model.alertsPaused ? "play.fill" : "pause.fill"
+                        )
+                    }
+                    .disabled(model.busy)
                 }
             } label: {
                 HStack(spacing: 8) {
@@ -140,28 +152,9 @@ struct MainView: View {
                             .offset(x: 22)
                             .accessibilityLabel(model.eaOnline ? "EA 在线" : "EA 离线")
                     }
-
-                HStack {
-                    Spacer(minLength: 0)
-                    Button {
-                        Task { await model.togglePause() }
-                    } label: {
-                        Text(model.alertsPaused ? "恢复" : "暂停")
-                            .font(.subheadline.weight(.semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                Capsule().fill(
-                                    model.alertsPaused
-                                    ? Color.appButton
-                                    : Color.primary.opacity(0.12)
-                                )
-                            )
-                            .foregroundStyle(model.alertsPaused ? Color.white : Color.primary)
-                    }
-                    .disabled(model.busy)
-                }
+                // 暂停按钮已从画面去掉，改到左上角「提醒事项」菜单里（ren 2026-10-28）。
             }
+            .frame(maxWidth: .infinity)
 
             // 最终价：不带文字标签，只显示价格本身（计算结果最后一步的值），居中，
             // 比实时价小一号。从未计算成功过显示 0；成功过则默认显示上次结果，

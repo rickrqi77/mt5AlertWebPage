@@ -18,6 +18,8 @@ struct AlertRowView: View {
     /// 只记进度不记价格本身，价格始终以模型为准）。
     @State private var swipeStartPrice: Double?
     @State private var swipeStepsApplied = 0
+    /// 外观（浅色/深色）：盈亏正数的颜色两种模式不同，见 pnlColor。
+    @Environment(\.colorScheme) private var colorScheme
 
     /// 价格字段直接读写模型：读 = item.priceText，写 = 用户编辑时回传模型。
     private var priceBinding: Binding<String> {
@@ -68,6 +70,21 @@ struct AlertRowView: View {
         }
         // 行底色与画面背景同色（深色黑/浅色白，随系统外观）。
         .background(Color(uiColor: .systemBackground))
+        // 行间分割线（ren 2026-10-28 要求）：每一行下方画一条线，第一行上方
+        // 也画一条（最后一行下方的线就是它自己的底线）。用 overlay 画，
+        // 不占布局尺寸，不影响行高实测与 11 行可视高度。
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.primary.opacity(0.25))
+                .frame(height: 1)
+        }
+        .overlay(alignment: .top) {
+            if index == 0 {
+                Rectangle()
+                    .fill(Color.primary.opacity(0.25))
+                    .frame(height: 1)
+            }
+        }
     }
 
     /// 在价格上左右滑动调价（ren 2026-10-28 恢复此手势，滑动删除取消）：
@@ -103,7 +120,12 @@ struct AlertRowView: View {
 
     private var pnlColor: Color {
         guard let pnl else { return .secondary }
-        if pnl > 0 { return Color(red: 0.3, green: 0.75, blue: 0.45) }
+        if pnl > 0 {
+            // 正数：深色用绿色，浅色用蓝色（ren 2026-10-28 定）。
+            return colorScheme == .light
+                ? Color(uiColor: .systemBlue)
+                : Color(red: 0.3, green: 0.75, blue: 0.45)
+        }
         if pnl < 0 { return Color(red: 0.9, green: 0.4, blue: 0.35) }
         return Color.primary.opacity(0.55)
     }
