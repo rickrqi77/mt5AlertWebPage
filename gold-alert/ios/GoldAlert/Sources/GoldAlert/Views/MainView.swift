@@ -6,8 +6,11 @@ struct MainView: View {
     @StateObject private var liquidation = LiquidationViewModel()
     @State private var confirmClear = false
     @State private var confirmSaveEmpty = false
-    /// 实测相邻两行的行距（行高+间隔），用于精确算出「正好 11 行」的列表高度。
-    @State private var alertRowPitch: CGFloat = 44
+    /// 实测的单行内容高度（不含行间隔），由前两行原点之差减去当前间隔得到。
+    @State private var alertRowHeight: CGFloat = 38
+    /// 提醒面板的实际高度（背景 GeometryReader 实测）：用来把行间隔按可用空间
+    /// 自动拉开、填满面板下方，避免大屏（如 iPhone 17）下方空一大块。
+    @State private var alertsPanelHeight: CGFloat = 0
 
     var body: some View {
         // 无外层滚动条：整屏紧凑排版一屏装下，提醒行多时只在面板内部滚动。
@@ -224,7 +227,7 @@ struct MainView: View {
                 // 列表不做任何自动滚动：数据变化、推送完成、价格更新都不移动位置，
                 // 停在哪里完全由用户自己滑动决定（ren 21:48 明确取消自动定位到当前价）。
                 ScrollView(.vertical, showsIndicators: true) {
-                    LazyVStack(alignment: .leading, spacing: Self.alertRowSpacing) {
+                    LazyVStack(alignment: .leading, spacing: effectiveRowSpacing) {
                         ForEach(Array(model.alerts.enumerated()), id: \.element.rowKey) { index, item in
                             AlertRowView(
                                 index: index,
@@ -250,11 +253,15 @@ struct MainView: View {
                 }
                 .coordinateSpace(name: "alertRows")
                 // 高度正好容纳 11 行整行：默认完整显示 11 个，超出的在列表内滑动，
-                // 不会出现最后一行只露一半。
+                // 不会出现最后一行只露一半。面板比 11 行紧凑高度更高时（大屏），
+                // 多出的高度平摊进行间隔里（effectiveRowSpacing），下方不留空。
                 .frame(height: visibleRowsHeight)
                 .onPreferenceChange(RowOriginsKey.self) { origins in
                     if let y0 = origins[0], let y1 = origins[1], y1 > y0 {
-                        alertRowPitch = y1 - y0
+                        let measured = (y1 - y0) - effectiveRowSpacing
+                        if measured > 10, abs(measured - alertRowHeight) > 0.5 {
+                            alertRowHeight = measured
+                        }
                     }
                 }
             }
@@ -263,19 +270,49 @@ struct MainView: View {
         // 面板占满工具栏下方的全部空间、内容顶对齐：清除到空列表时也稳稳贴在上方，
         // 不会缩成一小块浮在画面中间。
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04))
+                // 实测面板高度，供行间隔按可用空间自动拉开（见 effectiveRowSpacing）。
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear { alertsPanelHeight = geo.size.height }
+                        .onChange(of: geo.size.height) { _, newHeight in
+                            alertsPanelHeight = newHeight
+                        }
+                }
+            }
+        )
     }
 
-    /// 列表可视高度：最多 11 行整行（n 行 = n × 行距 − 1 个间隔，行距由前两行原点实测）。
+    /// 实际行间隔：先按紧凑值排 11 行，面板还有多余高度时把多余部分
+    /// 平摊到各行之间（间隔拉大一点点、整屏铺满，下方不空），封顶 maxRowSpacing；
+    /// 小屏没有多余高度时就用紧凑值。小屏/大屏（含 iPhone 17）都自适应，不写死机型。
+    private var effectiveRowSpacing: CGFloat {
+        let n = min(model.alerts.count, Self.maxVisibleAlertRows)
+        guard n > 1, alertsPanelHeight > 0 else { return Self.minRowSpacing }
+        let compact = CGFloat(n) * alertRowHeight + CGFloat(n - 1) * Self.minRowSpacing
+        let available = alertsPanelHeight - Self.panelChromeHeight
+        guard available > compact else { return Self.minRowSpacing }
+        let spread = (available - compact) / CGFloat(n - 1)
+        return min(Self.minRowSpacing + spread, Self.maxRowSpacing)
+    }
+
+    /// 列表可视高度：最多 11 行整行（n 行内容 + n−1 个实际间隔）。
     private var visibleRowsHeight: CGFloat {
         let n = min(model.alerts.count, Self.maxVisibleAlertRows)
         guard n > 0 else { return 0 }
-        return CGFloat(n) * alertRowPitch - Self.alertRowSpacing
+        return CGFloat(n) * alertRowHeight + CGFloat(n - 1) * effectiveRowSpacing
     }
 
     /// 默认完整显示的行数，其余滑动查看。
     private static let maxVisibleAlertRows = 11
-    private static let alertRowSpacing: CGFloat = 8
+    /// 紧凑行间隔（可用空间不足时的下限，与改版前一致，保证小屏不溢出）。
+    private static let minRowSpacing: CGFloat = 8
+    /// 行间隔封顶，避免行数很少时被拉得太开。
+    private static let maxRowSpacing: CGFloat = 24
+    /// 面板里列表之外的固定占用：上下内边距 20 + 标题行约 24 + 标题与列表间隔 8。
+    private static let panelChromeHeight: CGFloat = 52
 
     /// 收集每行在滚动区坐标系中的顶部 Y，用于实测相邻两行的行距。
     private struct RowOriginsKey: PreferenceKey {
