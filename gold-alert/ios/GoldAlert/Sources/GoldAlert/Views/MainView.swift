@@ -17,7 +17,6 @@ struct MainView: View {
             priceHero
             toolbarRow
             alertsPanel
-                .frame(maxHeight: .infinity)
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -251,6 +250,9 @@ struct MainView: View {
             }
         }
         .padding(10)
+        // 面板占满工具栏下方的全部空间、内容顶对齐：清除到空列表时也稳稳贴在上方，
+        // 不会缩成一小块浮在画面中间。
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
     }
 

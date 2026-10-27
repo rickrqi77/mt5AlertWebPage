@@ -240,6 +240,11 @@ final class AppViewModel: ObservableObject {
         }
         busy = true
         defer { busy = false }
+        // 生成全程把列表锁住（alertsDirty=true）：3 秒一次的云端轮询在此期间
+        // 不许用服务器上的旧设定盖掉正在生成/刚生成的新列表——此前有设定时改间隔
+        // 看似没反应，就是新列表生成后又被轮询并发的旧数据盖回（清空后无旧数据可盖，才偶尔看似有效）。
+        let wasDirty = alertsDirty
+        alertsDirty = true
         do {
             let data = try await CloudflareClient.shared.autoGenerate(
                 baseURL: baseURL,
@@ -248,12 +253,32 @@ final class AppViewModel: ObservableObject {
                 price: price
             )
             alerts = (data.alerts ?? []).map { $0.asItem() }
-            alertsDirty = false
             if let s = data.step, s > 0 { step = s } else { step = stepToUse }
+        } catch {
+            alertsDirty = wasDirty
+            showToast(error.localizedDescription, error: true)
+            return
+        }
+        // 紧接着把生成结果保存到服务器（等同于生成后再点一次「保存」），确保网站/EA
+        // 一定拿到新设定，不依赖 /api/alerts/auto 本身是否落库。
+        do {
+            let saved = try await CloudflareClient.shared.saveAlerts(
+                baseURL: baseURL,
+                token: token,
+                alerts: alerts,
+                step: step
+            )
+            if let savedAlerts = saved.alerts {
+                alerts = savedAlerts.map { $0.asItem() }
+            }
+            alertsDirty = false
             persistState()
             flashDone()
         } catch {
-            showToast(error.localizedDescription, error: true)
+            // 生成结果已在本地显示；保存没成功就保持列表锁定（轮询不盖回），
+            // 提示用户可再点「保存」推送到网站。
+            showToast("已生成，但保存到网站失败：\(error.localizedDescription)", error: true)
+            persistState()
         }
     }
 
