@@ -46,7 +46,7 @@ struct AlertRowView: View {
                 SelectAllPriceField(text: priceBinding)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
-                .frame(width: 112, minHeight: 36, alignment: .leading)
+                .frame(minWidth: 112, maxWidth: 112, minHeight: 36, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
 
                 // 盈亏数字：价格与触发按钮之间。通知价/实时价/手数/汇率任一变化，
