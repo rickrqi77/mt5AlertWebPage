@@ -288,8 +288,8 @@ struct MainView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             ZStack {
-                // 提醒区域不要独立底色，与画面背景同色（深色黑/浅色白，随系统外观）。
-                Color(uiColor: .systemBackground)
+                // 提醒区域不要独立底色，与画面背景同色（appBackground）。
+                Color.appBackground
                 // 实测面板高度，供行间隔按可用空间自动拉开（见 effectiveRowSpacing）。
                 GeometryReader { geo in
                     Color.clear

@@ -19,7 +19,15 @@ extension Color {
             : UIColor.systemBlue
     })
 
-    /// 按钮底色（ren 2026-10-28 定）：保存按钮与触发按钮统一用它、配白字——
+    /// 画面背景（ren 2026-10-28 定）：深色模式纯黑；浅色模式不用纯白，
+    /// 亮度稍微压低一点点（0.93 的浅灰）。
+    static let appBackground = Color(UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor.black
+            : UIColor(white: 0.93, alpha: 1)
+    })
+
+    /// 按钮底色（ren 2026-10-28 定）：保存按钮与提醒按钮统一用它、配白字——
     /// 深色模式绿色，浅色模式蓝色（系统蓝）。
     static let appButton = Color(UIColor { traits in
         traits.userInterfaceStyle == .dark

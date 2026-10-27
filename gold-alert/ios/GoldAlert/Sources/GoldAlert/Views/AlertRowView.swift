@@ -72,8 +72,8 @@ struct AlertRowView: View {
         // 与上下分割线之间留出一致的空隙，每行间距看起来就一样了
         //（ren 2026-10-28）。行高变大由 MainView 的实测自动适配。
         .padding(.vertical, 6)
-        // 行底色与画面背景同色（深色黑/浅色白，随系统外观）。
-        .background(Color(uiColor: .systemBackground))
+        // 行底色与画面背景同色（appBackground：深色黑，浅色略压亮度的浅灰）。
+        .background(Color.appBackground)
         // 行间分割线（ren 2026-10-28 要求）：每一行下方画一条线，第一行上方
         // 也画一条（最后一行下方的线就是它自己的底线）。用 overlay 画，
         // 不占布局尺寸，不影响行高实测与可视高度。
@@ -136,7 +136,7 @@ struct AlertRowView: View {
 
     private var armTitle: String {
         if !item.enabled && item.triggered { return "已用" }
-        return item.enabled ? "触发" : "关闭"
+        return item.enabled ? "提醒" : "关闭"
     }
 
     private var armColor: Color {
@@ -149,7 +149,7 @@ struct AlertRowView: View {
         return Color.primary.opacity(0.12)
     }
 
-    /// 按钮文字色：绿色「触发」底上用白字；灰底（关闭/已用）随外观用主色/次色，
+    /// 按钮文字色：绿色「提醒」底上用白字；灰底（关闭/已用）随外观用主色/次色，
     /// 保证浅色模式下也看得清。
     private var armForeground: Color {
         if item.enabled { return .white }
