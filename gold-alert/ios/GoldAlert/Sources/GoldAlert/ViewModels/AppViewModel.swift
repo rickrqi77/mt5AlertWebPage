@@ -181,7 +181,12 @@ final class AppViewModel: ObservableObject {
     /// 不是四舍五入），以这个整数为起点，往小按间隔设 7 个、往大按间隔设 7 个，
     /// 加上起点本身共 15 个；全部设完后按价格升序排序显示。
     /// 除起点外其余全部设为有效（触发），起点设为关闭（现价就在该点附近，避免立即触发）。
-    /// 全过程画面保持旧列表不动，保存成功后一次性替换；失败则什么都不变。
+    ///
+    /// 推送顺序（ren 定版）：价格定下来、网格算好后，先把新网格刷新到画面上；
+    /// 之后等到下一次推送时间（一个 3 秒同步周期，EA 同步与云端轮询都是 3 秒）
+    /// 再把这份网格推给服务器。等待期间 busy+alertsDirty 保持锁定，
+    /// 后台轮询不许用服务器上的旧设定盖掉画面刚显示的新网格。
+    /// 推送失败时画面不回退：新网格继续留在画面上、保持锁定，用户可点「保存」重试。
     func applyStep(_ value: Double) async {
         let previousStep = step
         let wasDirty = alertsDirty
@@ -192,7 +197,7 @@ final class AppViewModel: ObservableObject {
         defer { busy = false }
         alertsDirty = true
 
-        // 价格完全用 EA 推送价：先刷新一次状态拿到最新推送价。
+        // 价格完全用 EA 推送价：先刷新一次状态拿到最新推送价，价格就此定下来。
         await refreshCloudState()
         let price = eaPrice
         guard price > 0 else {
@@ -204,6 +209,14 @@ final class AppViewModel: ObservableObject {
         }
 
         let grid = Self.buildGrid(centerPrice: price, step: value)
+
+        // 第一步：先刷新画面——新网格立刻显示，不等服务器。
+        alerts = grid
+        persistState()
+
+        // 第二步：等下一次推送时间到（一个 3 秒周期）再推给服务器。
+        try? await Task.sleep(nanoseconds: UInt64(Self.cloudPollSeconds * 1_000_000_000))
+
         do {
             let data = try await CloudflareClient.shared.saveAlerts(
                 baseURL: baseURL,
@@ -211,15 +224,16 @@ final class AppViewModel: ObservableObject {
                 alerts: grid,
                 step: value
             )
-            // 一次性替换显示：优先用服务器回显（带 id），没有就用本地算好的网格。
+            // 推送完成：优先用服务器回显（带 id），没有就保留画面上的网格。
             alerts = (data.alerts ?? []).map { $0.asItem() }
             if alerts.isEmpty { alerts = grid }
             alertsDirty = false
             persistState()
             flashDone()
         } catch {
-            alertsDirty = wasDirty
-            step = previousStep
+            // 已先刷新画面，失败也不把画面退回旧设定；保持锁定防轮询盖回，
+            // 提示后用户可点「保存」把画面这份网格重试推送。
+            alertsDirty = true
             persistState()
             showToast(error.localizedDescription, error: true)
         }
