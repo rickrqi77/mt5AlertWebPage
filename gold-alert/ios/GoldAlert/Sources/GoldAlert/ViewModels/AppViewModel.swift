@@ -177,9 +177,10 @@ final class AppViewModel: ObservableObject {
     /// 不合并，EA 同步也不会把旧设定带回来；截图里的新旧混合出在 app 行视图复用，
     /// 已由 AlertItem.rowKey 与行内草稿同步修复。）
     ///
-    /// 间隔逻辑（ren 定版）：以当前 EA 价格取整为中心点，从中心向前、向后各按间隔
-    /// 空出点数设定，前后各 7 个、加上中心共 15 个；除中心点外其余全部设为有效（触发），
-    /// 中心点设为关闭（现价就在该点上，避免立即触发）。
+    /// 间隔逻辑（ren 定版）：先确定当前 EA 价格的整数部分（只取整数、小数直接舍去，
+    /// 不是四舍五入），以这个整数为起点，往小按间隔设 7 个、往大按间隔设 7 个，
+    /// 加上起点本身共 15 个；全部设完后按价格升序排序显示。
+    /// 除起点外其余全部设为有效（触发），起点设为关闭（现价就在该点附近，避免立即触发）。
     /// 全过程画面保持旧列表不动，保存成功后一次性替换；失败则什么都不变。
     func applyStep(_ value: Double) async {
         let previousStep = step
@@ -224,19 +225,33 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// 按间隔逻辑本地生成网格：中心 = 当前价取整；中心 ± 间隔×1..7；升序排列；
-    /// 中心点关闭（enabled=false），其余全部触发（enabled=true），均未触发过。
+    /// 按间隔逻辑本地生成网格（ren 定版，严格按此顺序）：
+    /// 1. 起点 = 当前价的整数部分（Int 直接截断小数，不四舍五入；
+    ///    例：4013.80 的起点是 4013，不是 4014。服务器 /api/alerts/auto 同样用 4013，
+    ///    旧版用 rounded() 四舍五入是小数 ≥.5 时整格错位 1 的根源）；
+    /// 2. 从起点往小设 7 个：起点 − 间隔×1...7；
+    /// 3. 从起点往大设 7 个：起点 + 间隔×1...7；
+    /// 4. 全部设完后按价格升序排序。
+    /// 起点关闭（enabled=false），其余全部触发（enabled=true），均未触发过。
     private static func buildGrid(centerPrice: Double, step: Double) -> [AlertItem] {
-        let center = centerPrice.rounded()
-        return (-7...7).map { offset in
-            let point = center + Double(offset) * step
-            return AlertItem(
-                id: nil,
-                priceText: String(format: "%.2f", point),
-                enabled: offset != 0,
-                triggered: false
-            )
+        let start = Double(Int(centerPrice))
+        var points: [(price: Double, isStart: Bool)] = [(start, true)]
+        for i in 1...7 {
+            points.append((start - step * Double(i), false))
         }
+        for i in 1...7 {
+            points.append((start + step * Double(i), false))
+        }
+        return points
+            .sorted { $0.price < $1.price }
+            .map { point in
+                AlertItem(
+                    id: nil,
+                    priceText: String(format: "%.2f", point.price),
+                    enabled: !point.isStart,
+                    triggered: false
+                )
+            }
     }
 
     func saveAlerts() async {
