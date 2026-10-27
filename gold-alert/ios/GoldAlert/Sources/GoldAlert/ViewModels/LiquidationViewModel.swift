@@ -8,12 +8,19 @@ final class LiquidationViewModel: ObservableObject {
     private static let lastPriceKey = "lastLiquidationPrice_v1"
     private static let processedAssetKey = "lastProcessedScreenshotID_v1"
     private static let tradeDataKey = "lastScreenshotTradeData_v1"
+    private static let usdJpyRateKey = "lastUSDJPYRate_v1"
 
     @Published var mode: LiquidationMode
     @Published var busy = false
     @Published var result: LiquidationResult?
     /// 上一次计算成功的最终价（持久化）。从未计算成功过为 0。
     @Published private(set) var lastLiquidationPrice: Double
+    /// 合计手数：最近一次截图解析出的全部 GOLD 持仓手数之和（持久化恢复），
+    /// 供每行盈亏数字计算用（点差 × 合计手数）。从未解析成功过为 0。
+    @Published private(set) var totalLots: Double
+    /// 美日实时汇率（USDJPY）：日元模式算最终价时取得，另持久化上次的值，
+    /// 供每行盈亏数字在日元模式下换算用。从未取得过为 0。
+    @Published private(set) var usdJpyRate: Double
 
     init() {
         // 默认美元模式；用户设定过模式则以下次打开仍用上次设定的（modeKey 持久化）。
@@ -24,6 +31,16 @@ final class LiquidationViewModel: ObservableObject {
             mode = .usd
         }
         lastLiquidationPrice = UserDefaults.standard.object(forKey: Self.lastPriceKey) as? Double ?? 0
+        totalLots = Self.loadTradeData()?.totalLots ?? 0
+        usdJpyRate = UserDefaults.standard.object(forKey: Self.usdJpyRateKey) as? Double ?? 0
+    }
+
+    /// 刷新美日实时汇率（日元模式下每行盈亏数字要用）；失败静默、保留上次的值。
+    func refreshUSDJPYRate() async {
+        if let rate = try? await SwissquoteClient.shared.fetchUSDJPY(), rate > 0 {
+            usdJpyRate = rate
+            UserDefaults.standard.set(rate, forKey: Self.usdJpyRateKey)
+        }
     }
 
     /// 画面实时价下方显示的最终价：本次算出新的用新的，否则显示上次结果（无则 0）。
@@ -77,6 +94,7 @@ final class LiquidationViewModel: ObservableObject {
             let data = try MT5ScreenshotParser.parse(ocrText: ocr)
             // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
             Self.saveTradeData(data)
+            totalLots = data.totalLots
 
             let calculated = try await Self.calculate(mode: mode, data: data)
             applyResult(calculated)
@@ -93,6 +111,12 @@ final class LiquidationViewModel: ObservableObject {
         result = calculated
         lastLiquidationPrice = calculated.liquidationPrice
         UserDefaults.standard.set(calculated.liquidationPrice, forKey: Self.lastPriceKey)
+        totalLots = calculated.totalLots
+        // 日元模式计算时用的汇率一并留住，供每行盈亏数字换算。
+        if let rate = calculated.usdJpyRate, rate > 0 {
+            usdJpyRate = rate
+            UserDefaults.standard.set(rate, forKey: Self.usdJpyRateKey)
+        }
     }
 
     private static func calculate(mode: LiquidationMode, data: ScreenshotTradeData) async throws -> LiquidationResult {

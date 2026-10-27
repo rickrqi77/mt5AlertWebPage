@@ -3,6 +3,8 @@ import SwiftUI
 struct AlertRowView: View {
     let index: Int
     let item: AlertItem
+    /// 这一行「到达通知价时的盈亏」整数（按当前模式公式算好后传入）；算不出时为 nil，显示 --。
+    let pnl: Int?
     let onPriceChange: (String) -> Void
     let onToggleArm: () -> Void
     let onDelete: () -> Void
@@ -12,9 +14,8 @@ struct AlertRowView: View {
     // 逐行显示的正是旧 step3 网格在相同行号上的旧值），靠 onAppear/task/onChange
     // 同步总有行漏掉。改为直接绑定模型值：模型是什么价，画面就显示什么价，
     // 没有第二份状态可以残留。
-    @State private var dragStepIndex = 0
-
-    private let swipeStepWidth: CGFloat = 28
+    /// 滑动删除时整行的横向偏移（手势驱动，松手未达阈值则弹回）。
+    @State private var dragOffset: CGFloat = 0
 
     /// 价格字段直接读写模型：读 = item.priceText，写 = 用户编辑时回传模型。
     private var priceBinding: Binding<String> {
@@ -22,73 +23,89 @@ struct AlertRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text("\(index + 1).")
-                .font(.body.monospacedDigit())
-                .foregroundStyle(Color.white.opacity(0.45))
-                .frame(width: 28, alignment: .leading)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .layoutPriority(1)
-
-            SelectAllPriceField(text: priceBinding)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .frame(maxWidth: 160, minHeight: 36, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
-
-            Button(armTitle) { onToggleArm() }
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 8).fill(armColor))
-                .foregroundStyle(.white)
-
-            Button("删除") { onDelete() }
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .foregroundStyle(Color(red: 0.9, green: 0.4, blue: 0.35))
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(red: 0.9, green: 0.4, blue: 0.35).opacity(0.85), lineWidth: 1)
+        ZStack {
+            // 滑动时在行底下露出的删除区（左滑露右、右滑露左）。
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(red: 0.75, green: 0.22, blue: 0.17))
+                .overlay(
+                    HStack {
+                        if dragOffset > 8 {
+                            Text("删除").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                            Spacer()
+                        } else if dragOffset < -8 {
+                            Spacer()
+                            Text("删除").font(.subheadline.weight(.semibold)).foregroundStyle(.white)
+                        }
+                    }
+                    .padding(.horizontal, 14)
                 )
+                .opacity(dragOffset == 0 ? 0 : 1)
+
+            HStack(spacing: 6) {
+                // 没有行号：价格就在最左边，框缩到正好放下数字。
+                SelectAllPriceField(text: priceBinding)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .frame(width: 112, minHeight: 36, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+
+                // 盈亏数字：价格与触发按钮之间。通知价/实时价/手数/汇率任一变化，
+                // 画面重算后这里立刻跟着变（值由 MainView 按模式公式算好传入）。
+                Text(pnlText)
+                    .font(.body.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(pnlColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+
+                // 触发按钮固定在这一行最右边、右对齐。
+                Button(armTitle) { onToggleArm() }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(armColor))
+                    .foregroundStyle(.white)
+            }
+            // 行自身的不透明底色（与面板在黑底上的合成色一致），盖住底下的删除区；
+            // 滑动时整行横移、删除区才露出来。
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color(white: 0.04)))
+            .offset(x: dragOffset)
         }
         .contentShape(Rectangle())
-        .simultaneousGesture(swipeAdjustGesture)
+        .simultaneousGesture(swipeDeleteGesture)
     }
 
-    /// Left swipe −0.5, right swipe +0.5 (per ~28pt).
-    private var swipeAdjustGesture: some Gesture {
+    /// 滑动删行：横向滑过阈值（90pt，左右均可）松手就删这一行；
+    /// 没滑够就弹回。替代了旧的「滑动调价 ±0.5」手势（ren 22:44 改定）。
+    private var swipeDeleteGesture: some Gesture {
         DragGesture(minimumDistance: 16, coordinateSpace: .local)
             .onChanged { value in
-                // Prefer horizontal swipes.
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                let idx = Int((value.translation.width / swipeStepWidth).rounded(.towardZero))
-                let deltaSteps = idx - dragStepIndex
-                if deltaSteps != 0 {
-                    nudgePrice(by: Double(deltaSteps) * 0.5)
-                    dragStepIndex = idx
+                // 只认横向滑动；纵向是列表滚动，不动这一行。
+                guard abs(value.translation.width) > abs(value.translation.height) else {
+                    if dragOffset != 0 { dragOffset = 0 }
+                    return
                 }
+                dragOffset = value.translation.width
             }
-            .onEnded { _ in
-                dragStepIndex = 0
+            .onEnded { value in
+                if abs(value.translation.width) >= 90 {
+                    onDelete()
+                } else {
+                    withAnimation(.easeOut(duration: 0.15)) { dragOffset = 0 }
+                }
             }
     }
 
-    private func nudgePrice(by delta: Double) {
-        let cleaned = item.priceText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let current = Double(cleaned) else { return }
-        let next = current + delta
-        let text: String
-        if abs(next - next.rounded()) < 1e-9 {
-            text = String(format: "%.0f", next)
-        } else if abs(next * 2 - (next * 2).rounded()) < 1e-9 {
-            text = String(format: "%.1f", next)
-        } else {
-            text = String(format: "%.2f", next)
-        }
-        onPriceChange(text)
+    private var pnlText: String {
+        guard let pnl else { return "--" }
+        return String(pnl)
+    }
+
+    private var pnlColor: Color {
+        guard let pnl else { return Color.white.opacity(0.4) }
+        if pnl > 0 { return Color(red: 0.3, green: 0.75, blue: 0.45) }
+        if pnl < 0 { return Color(red: 0.9, green: 0.4, blue: 0.35) }
+        return Color.white.opacity(0.55)
     }
 
     private var armTitle: String {

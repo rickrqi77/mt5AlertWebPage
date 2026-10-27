@@ -24,10 +24,22 @@ struct MainView: View {
         // 每次打开画面：自动找截图里最后一张图算最终价（找不到/图不对静默，不提示）。
         .task {
             await liquidation.autoCalculateFromLatestScreenshot()
+            // 日元模式下每行盈亏数字要用美日实时汇率，打开画面时先刷一次。
+            if liquidation.mode == .jpy { await liquidation.refreshUSDJPYRate() }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                Task { await liquidation.autoCalculateFromLatestScreenshot() }
+                Task {
+                    await liquidation.autoCalculateFromLatestScreenshot()
+                    if liquidation.mode == .jpy { await liquidation.refreshUSDJPYRate() }
+                }
+            }
+        }
+        // 切到日元模式时补刷一次汇率（切模式重算最终价已带回汇率时则以那次为准，
+        // 这里主要兜底没有持仓数据可重算的情况）。
+        .onChange(of: liquidation.mode) { _, newMode in
+            if newMode == .jpy {
+                Task { await liquidation.refreshUSDJPYRate() }
             }
         }
         .confirmationDialog("确定清除全部提醒？", isPresented: $confirmClear, titleVisibility: .visible) {
@@ -217,6 +229,7 @@ struct MainView: View {
                             AlertRowView(
                                 index: index,
                                 item: item,
+                                pnl: pnl(for: item),
                                 onPriceChange: { model.updatePrice(at: index, text: $0) },
                                 onToggleArm: { model.toggleArm(at: index) },
                                 onDelete: { model.deleteAlert(at: index) }
@@ -270,6 +283,22 @@ struct MainView: View {
         static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
             value.merge(nextValue()) { _, new in new }
         }
+    }
+
+    /// 每行盈亏数字（ren 定版公式）：到达这一行通知价时，相对于现在是盈是亏。
+    /// 美元模式：(实时价格 − 通知价格) × 合计手数，取整数；
+    /// 日元模式：(实时价格 − 通知价格) × 合计手数 ÷ 美日实时汇率，取整数。
+    /// 实时价格就是画面大价格（EA 推送价）；合计手数、汇率来自最近一次截图解析/
+    /// 最终价计算（LiquidationViewModel）。任一输入缺失（无实时价、无汇率）返回 nil 显示 --；
+    /// 通知价本身一变（用户改数字、重新设定间隔），本函数随画面重算自动刷新。
+    private func pnl(for item: AlertItem) -> Int? {
+        guard let alertPrice = item.priceValue, alertPrice > 0, model.displayPrice > 0 else { return nil }
+        var value = (model.displayPrice - alertPrice) * liquidation.totalLots
+        if liquidation.mode == .jpy {
+            guard liquidation.usdJpyRate > 0 else { return nil }
+            value /= liquidation.usdJpyRate
+        }
+        return Int(value)
     }
 
     private func format(_ value: Double) -> String {
