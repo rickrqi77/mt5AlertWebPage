@@ -149,7 +149,7 @@ final class AppViewModel: ObservableObject {
                     var item = dto.asItem()
                     // 复用稳定身份（id 与价格都对上才算同一行，其次按价格），
                     // 避免刷新时重建行、滚动位置跳回顶部；价格不同绝不继承身份，
-                    // 否则行视图会把旧价格的草稿状态带进新设定。
+                    // 否则新设定的一行会被误认成旧设定同价的那一行。
                     let byId = existing.first(where: { $0.id != nil && $0.id == item.id && $0.priceText == item.priceText })
                     let byPrice = existing.first(where: { $0.priceText == item.priceText })
                     if let match = byId ?? byPrice {
@@ -174,8 +174,9 @@ final class AppViewModel: ObservableObject {
 
     /// 间隔下拉改动后立刻生效：本地按间隔逻辑直接算出完整网格，一次保存覆盖服务器。
     /// （2026-10-27 实测服务器：POST /api/alerts 与 /api/alerts/auto 都是整表替换、
-    /// 不合并，EA 同步也不会把旧设定带回来；截图里的新旧混合出在 app 行视图复用，
-    /// 已由 AlertItem.rowKey 与行内草稿同步修复。）
+    /// 不合并，EA 同步也不会把旧设定带回来；截图里的新旧混合出在 app 行视图：
+    /// 行按位置（.id(index)）复用 + 行内 @State 价格草稿残留同行号旧值。
+    /// 现已拆除草稿——价格直接显示模型值，行身份统一用 AlertItem.rowKey。）
     ///
     /// 间隔逻辑（ren 定版）：先确定当前 EA 价格的整数部分（只取整数、小数直接舍去，
     /// 不是四舍五入），以这个整数为起点，往小按间隔设 7 个、往大按间隔设 7 个，
@@ -187,6 +188,11 @@ final class AppViewModel: ObservableObject {
     /// 再把这份网格推给服务器。等待期间 busy+alertsDirty 保持锁定，
     /// 后台轮询不许用服务器上的旧设定盖掉画面刚显示的新网格。
     /// 推送失败时画面不回退：新网格继续留在画面上、保持锁定，用户可点「保存」重试。
+    ///
+    /// 「立刻刷新」的关键：定价直接用画面上正在显示的 EA 价格（eaPrice 本来就由
+    /// 3 秒轮询保持最新），算网格、换列表全部在第一个 await 之前同步完成——
+    /// 旧版先 await 一次网络刷新才换列表，画面要等网络回来才动，
+    /// 看起来就像等到下一次价格更新才刷新（ren 21:35 实测反馈）。
     func applyStep(_ value: Double) async {
         let previousStep = step
         let wasDirty = alertsDirty
@@ -197,9 +203,13 @@ final class AppViewModel: ObservableObject {
         defer { busy = false }
         alertsDirty = true
 
-        // 价格完全用 EA 推送价：先刷新一次状态拿到最新推送价，价格就此定下来。
-        await refreshCloudState()
-        let price = eaPrice
+        // 价格就此定下：用画面当前显示的 EA 推送价，不先等网络。
+        var price = eaPrice
+        if price <= 0 {
+            // 只有 EA 还从未推过价（画面显示 --）时，才去服务器现取一次兜底。
+            await refreshCloudState()
+            price = eaPrice
+        }
         guard price > 0 else {
             alertsDirty = wasDirty
             step = previousStep
@@ -210,7 +220,7 @@ final class AppViewModel: ObservableObject {
 
         let grid = Self.buildGrid(centerPrice: price, step: value)
 
-        // 第一步：先刷新画面——新网格立刻显示，不等服务器。
+        // 第一步：立刻刷新画面——新网格当场显示，不等网络、不等下一次价格更新。
         alerts = grid
         persistState()
 
@@ -224,9 +234,12 @@ final class AppViewModel: ObservableObject {
                 alerts: grid,
                 step: value
             )
-            // 推送完成：优先用服务器回显（带 id），没有就保留画面上的网格。
-            alerts = (data.alerts ?? []).map { $0.asItem() }
-            if alerts.isEmpty { alerts = grid }
+            // 推送完成：服务器回显与画面网格内容一致时保留画面这份、不再整表替换，
+            // 避免推送后画面无谓地再重建一次；不一致时才以服务器回显为准。
+            let echoed = (data.alerts ?? []).map { $0.asItem() }
+            if !echoed.isEmpty, Self.alertsFingerprint(echoed) != Self.alertsFingerprint(grid) {
+                alerts = echoed
+            }
             alertsDirty = false
             persistState()
             flashDone()

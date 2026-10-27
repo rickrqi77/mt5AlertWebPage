@@ -7,10 +7,19 @@ struct AlertRowView: View {
     let onToggleArm: () -> Void
     let onDelete: () -> Void
 
-    @State private var draft: String = ""
+    // 注意：价格不设 @State 草稿。草稿是历次「新旧混合」的根源——行视图按位置
+    // 复用时草稿残留上一份设定同位置的价格（2026-10-27 21:35 截图实证：第 5 行起
+    // 逐行显示的正是旧 step3 网格在相同行号上的旧值），靠 onAppear/task/onChange
+    // 同步总有行漏掉。改为直接绑定模型值：模型是什么价，画面就显示什么价，
+    // 没有第二份状态可以残留。
     @State private var dragStepIndex = 0
 
     private let swipeStepWidth: CGFloat = 28
+
+    /// 价格字段直接读写模型：读 = item.priceText，写 = 用户编辑时回传模型。
+    private var priceBinding: Binding<String> {
+        Binding(get: { item.priceText }, set: { onPriceChange($0) })
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -22,21 +31,11 @@ struct AlertRowView: View {
                 .minimumScaleFactor(0.8)
                 .layoutPriority(1)
 
-            SelectAllPriceField(text: $draft)
+            SelectAllPriceField(text: priceBinding)
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .frame(maxWidth: 160, minHeight: 36, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
-            .onAppear { draft = item.priceText }
-            // 行视图被复用时 onAppear 不再触发，用 task(id:) 保证价格一变草稿必同步，
-            // 避免显示残留上一份设定的价格。
-            .task(id: item.priceText) { draft = item.priceText }
-            .onChange(of: item.priceText) { _, newValue in
-                if draft != newValue { draft = newValue }
-            }
-            .onChange(of: draft) { _, newValue in
-                onPriceChange(newValue)
-            }
 
             Button(armTitle) { onToggleArm() }
                 .font(.subheadline.weight(.semibold))
@@ -78,7 +77,7 @@ struct AlertRowView: View {
     }
 
     private func nudgePrice(by delta: Double) {
-        let cleaned = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = item.priceText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let current = Double(cleaned) else { return }
         let next = current + delta
         let text: String
@@ -89,7 +88,6 @@ struct AlertRowView: View {
         } else {
             text = String(format: "%.2f", next)
         }
-        draft = text
         onPriceChange(text)
     }
 

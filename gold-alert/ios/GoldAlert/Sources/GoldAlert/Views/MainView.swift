@@ -223,7 +223,9 @@ struct MainView: View {
                                     onToggleArm: { model.toggleArm(at: index) },
                                     onDelete: { model.deleteAlert(at: index) }
                                 )
-                                .id(index)
+                                // 行身份只能用 rowKey，绝不能用 .id(index) 按位置认行：
+                                // 按位置认行时视图被复用到新设定同行号上，是新旧混合的来源。
+                                .id(item.rowKey)
                                 .background(
                                     GeometryReader { geo in
                                         Color.clear.preference(
@@ -266,8 +268,10 @@ struct MainView: View {
         guard signature != scrolledSignature else { return }
         guard let target = nearestAlertIndex else { return }
         scrolledSignature = signature
+        // 行的滚动身份是 rowKey（与 .id 一致），不是行号。
+        let targetID = model.alerts[target].rowKey
         DispatchQueue.main.async {
-            proxy.scrollTo(target, anchor: .center)
+            proxy.scrollTo(targetID, anchor: .center)
         }
     }
 

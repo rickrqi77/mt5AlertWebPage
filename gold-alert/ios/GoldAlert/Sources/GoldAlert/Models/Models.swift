@@ -24,9 +24,9 @@ struct AlertItem: Identifiable, Equatable, Hashable, Sendable, Codable {
         Double(priceText.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    /// 列表行身份：价格或状态一变就视为新行。只用 localID 时，整表替换后
-    /// LazyVStack 可能复用旧行视图，行内 @State 草稿（显示的价格文本）残留
-    /// 上一份设定的值，画面会拼出新旧混合的列表（实测截图里的「中间段不对」）。
+    /// 列表行身份：价格或状态一变就视为新行。这是行在列表中唯一的身份
+    /// （ForEach 与 .id 都用它）；绝不能再叠加 .id(行号) 按位置认行——
+    /// 按位置复用旧行视图正是历次「新旧混合」截图的来源。
     var rowKey: String { "\(localID.uuidString)|\(priceText)|\(enabled)|\(triggered)" }
 }
 
