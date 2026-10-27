@@ -158,6 +158,12 @@ final class AppViewModel: ObservableObject {
         cloudTask = nil
     }
 
+    /// 列表内容指纹（价格+触发+已用），与网页版 alertsFingerprint 同义。
+    private static func alertsFingerprint(_ items: [AlertItem]) -> String {
+        items.map { "\($0.priceText)|\($0.enabled ? 1 : 0)|\($0.triggered ? 1 : 0)" }
+            .joined(separator: ",")
+    }
+
     private func persistState() {
         LocalCache.saveAlerts(alerts)
         LocalCache.saveStep(step)
@@ -183,7 +189,10 @@ final class AppViewModel: ObservableObject {
             async let statusReq = CloudflareClient.shared.getStatus(baseURL: baseURL, token: token)
             async let alertsReq = CloudflareClient.shared.getAlerts(baseURL: baseURL, token: token)
             let status = try await statusReq
-            let remote = try await alertsReq
+            let alertsPayload = try await alertsReq
+            // 与网页版一致：优先用 /api/status 一并带回的 alerts（与状态同一快照，
+            // 是 EA/网站正在用的那份）；/api/alerts 只在 status 没带列表时兜底。
+            let remoteDTOs = status.alerts ?? alertsPayload.alerts
             eaOnline = status.ea_online == true
             alertsPaused = status.paused == true || status.alerts_enabled == false
             if let p = status.price, p > 0 { lastEAStatusPrice = p }
@@ -191,7 +200,7 @@ final class AppViewModel: ObservableObject {
             if !busy, let s = status.step, s > 0 { step = s }
             if !alertsDirty {
                 let existing = alerts
-                alerts = remote.alerts.map { dto in
+                let mapped = remoteDTOs.map { dto -> AlertItem in
                     var item = dto.asItem()
                     // 复用稳定身份（按服务器 id，其次价格），避免刷新时重建行、滚动位置跳回顶部。
                     let byId = existing.first(where: { $0.id != nil && $0.id == item.id })
@@ -200,6 +209,11 @@ final class AppViewModel: ObservableObject {
                         item.localID = match.localID
                     }
                     return item
+                }
+                // 内容指纹没变就不替换列表（同网页版的做法），避免无谓重建行、
+                // 以及把刚应用的新设定又换回一份等价/滞后的拷贝。
+                if Self.alertsFingerprint(mapped) != Self.alertsFingerprint(existing) {
+                    alerts = mapped
                 }
             }
             persistState()
@@ -269,16 +283,17 @@ final class AppViewModel: ObservableObject {
 
         // 第二步：把生成结果保存到服务器（等同于生成后再点一次「保存」），确保网站/EA
         // 一定拿到新设定，不依赖 /api/alerts/auto 本身是否落库。
+        // 保存接口的返回值不用于显示——最终显示只认第一步生成接口给的网格，
+        // 避免保存返回的列表与生成结果不一致时画面被换回旧数据。
         do {
-            let saved = try await CloudflareClient.shared.saveAlerts(
+            _ = try await CloudflareClient.shared.saveAlerts(
                 baseURL: baseURL,
                 token: token,
                 alerts: generated,
                 step: generatedStep
             )
             // 全部就绪——一次性替换显示（整个流程里唯一改动 alerts 的地方）。
-            alerts = (saved.alerts ?? []).map { $0.asItem() }
-            if alerts.isEmpty { alerts = generated }
+            alerts = generated
             step = generatedStep
             alertsDirty = false
             persistState()
