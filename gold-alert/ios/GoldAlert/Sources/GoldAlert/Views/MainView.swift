@@ -238,8 +238,7 @@ struct MainView: View {
                                 item: item,
                                 pnl: pnl(for: item),
                                 onPriceChange: { model.updatePrice(at: index, text: $0) },
-                                onToggleArm: { model.toggleArm(at: index) },
-                                onDelete: { model.deleteAlert(at: index) }
+                                onToggleArm: { model.toggleArm(at: index) }
                             )
                             // 行身份只能用 rowKey，绝不能用 .id(index) 按位置认行：
                             // 按位置认行时视图被复用到新设定同行号上，是新旧混合的来源。
