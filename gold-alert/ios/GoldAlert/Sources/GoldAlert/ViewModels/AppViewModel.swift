@@ -37,7 +37,7 @@ final class AppViewModel: ObservableObject {
 
     /// EA 推送到服务器、由 /api/status 带回的价格。
     @Published private(set) var eaPrice: Double = 0
-    /// Swissquote 的 XAU/USD 报价（选 Swiss 来源时用，3 秒轮询刷新）。
+    /// Swissquote 的 XAU/USD 报价（选 Swiss 来源时用，Swiss 模式下 1 秒刷新一次）。
     @Published private(set) var swissPrice: Double = 0
     /// 当前实时价格来源（「提醒事项」菜单里切换，持久化）。
     @Published var priceSource: PriceSource = .ea
@@ -46,6 +46,7 @@ final class AppViewModel: ObservableObject {
     ///（尚无价格时为 0，画面显示 --）。
     var displayPrice: Double { priceSource == .ea ? eaPrice : swissPrice }
     private var cloudTask: Task<Void, Never>?
+    private var swissTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
     private var doneFlashTask: Task<Void, Never>?
 
@@ -126,12 +127,18 @@ final class AppViewModel: ObservableObject {
             await refreshSwissPrice()
         }
         // 定时刷新云端状态：EA 推送价格、在线小圆点（连上后变绿）、已触发的行变成“已用”。
-        // 价格来源选的是 Swiss 时，同一周期里顺带刷新 Swissquote 报价。
         let cloudNanos = UInt64(Self.cloudPollSeconds * 1_000_000_000)
         cloudTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: cloudNanos)
                 await self?.refreshCloudState()
+            }
+        }
+        // Swiss 模式专属的 1 秒报价轮询（ren 2026-10-28 定）：循环常开，
+        // refreshSwissPrice 内部按当前来源把关——EA 模式下每秒只是空转不取价。
+        swissTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
                 await self?.refreshSwissPrice()
             }
         }
@@ -158,6 +165,8 @@ final class AppViewModel: ObservableObject {
     func stopLoops() {
         cloudTask?.cancel()
         cloudTask = nil
+        swissTask?.cancel()
+        swissTask = nil
     }
 
     /// 列表内容指纹（价格+触发+已用），与网页版 alertsFingerprint 同义。
