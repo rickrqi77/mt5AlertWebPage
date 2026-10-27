@@ -225,25 +225,24 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// 间隔下拉改动后立刻生效：整个过程在后台进行，画面上的旧列表保持不动，
-    /// 新数据全部整理好后一次性替换显示——不出现先清空、再逐行冒出来的割裂感。
-    /// 生成顺序仍是「先清除（逻辑上不再沿用旧设定）、再生成」：生成请求不依赖旧列表，
-    /// 且全程锁定列表不让轮询插手；服务器只在最后收到一次最终结果（不推空表）。
+    /// 间隔下拉改动后立刻生效。整个流程在后台进行，画面旧列表保持不动，最后一次性替换。
+    ///
+    /// 顺序是实测（视频）定死的：服务器的生成接口在列表非空时只会原样返回现有设定
+    /// （“完成”会闪、数字却不变），只有先把服务器上的设定清空、再调生成，才会真正
+    /// 按新间隔生成新网格。所以必须：①先清服务器（本地画面不清空）→ ②生成 → ③一次性显示。
+    /// 两次请求紧挨着完成，EA 每 3 秒才同步一次，基本不会取到中间的空档；
+    /// 生成若失败，会把旧设定原样存回服务器，不留空表。
     func applyStep(_ value: Double) async {
+        let previousStep = step
+        let previousAlerts = alerts
+        let wasDirty = alertsDirty
         step = value
         persistState()
-        await autoGenerate()
-    }
 
-    func autoGenerate() async {
-        // 先把要用的间隔定住：下面兜底刷新云端状态时可能用服务器旧值覆盖 step，
-        // 生成请求必须用用户刚选的这个值，不能被覆盖掉。
-        let stepToUse = step
-        let wasDirty = alertsDirty
         busy = true
         defer { busy = false }
-        // 全程锁定列表（alertsDirty=true）：轮询不许动 alerts，画面保持旧列表原样，
-        // 直到最后一次性替换。busy 同时挡住轮询用旧 step 覆盖新间隔。
+        // 全程锁定列表：轮询不许动 alerts（尤其不许把服务器清空瞬间的空表刷到画面上），
+        // busy 同时挡住轮询用服务器旧 step 覆盖刚选的新间隔。
         alertsDirty = true
 
         // 建网格用的价格：先现货价；取不到就先刷新一次，再用服务器带回的 EA 价格兜底
@@ -259,52 +258,55 @@ final class AppViewModel: ObservableObject {
         }
         guard price > 0 else {
             alertsDirty = wasDirty
+            step = previousStep
+            persistState()
             showToast("还没有现货价格", error: true)
             return
         }
 
-        // 第一步：后台生成新网格（不碰画面上的 alerts）。
-        let generated: [AlertItem]
-        let generatedStep: Double
-        do {
-            let data = try await CloudflareClient.shared.autoGenerate(
-                baseURL: baseURL,
-                token: token,
-                step: stepToUse,
-                price: price
-            )
-            generated = (data.alerts ?? []).map { $0.asItem() }
-            if let s = data.step, s > 0 { generatedStep = s } else { generatedStep = stepToUse }
-        } catch {
-            alertsDirty = wasDirty
-            showToast(error.localizedDescription, error: true)
-            return
-        }
-
-        // 第二步：把生成结果保存到服务器（等同于生成后再点一次「保存」），确保网站/EA
-        // 一定拿到新设定，不依赖 /api/alerts/auto 本身是否落库。
-        // 保存接口的返回值不用于显示——最终显示只认第一步生成接口给的网格，
-        // 避免保存返回的列表与生成结果不一致时画面被换回旧数据。
+        // 第一步：把服务器上的现有设定清空（只动服务器，本地画面保持旧列表）。
         do {
             _ = try await CloudflareClient.shared.saveAlerts(
                 baseURL: baseURL,
                 token: token,
-                alerts: generated,
-                step: generatedStep
+                alerts: [],
+                step: value
             )
-            // 全部就绪——一次性替换显示（整个流程里唯一改动 alerts 的地方）。
-            alerts = generated
-            step = generatedStep
+        } catch {
+            alertsDirty = wasDirty
+            step = previousStep
+            persistState()
+            showToast(error.localizedDescription, error: true)
+            return
+        }
+
+        // 第二步：在空列表上生成新网格（生成接口此时才会真正按新间隔生成），
+        // 成功后一次性替换显示。生成结果即服务器的最终设定，不再额外多存一次。
+        do {
+            let data = try await CloudflareClient.shared.autoGenerate(
+                baseURL: baseURL,
+                token: token,
+                step: value,
+                price: price
+            )
+            alerts = (data.alerts ?? []).map { $0.asItem() }
+            if let s = data.step, s > 0 { step = s } else { step = value }
             alertsDirty = false
             persistState()
             flashDone()
         } catch {
-            // 保存失败：新网格已生成，仍一次性替换显示并保持锁定（轮询不盖回），
-            // 提示用户可再点「保存」推送到网站。
-            alerts = generated
-            step = generatedStep
+            // 生成失败：把旧设定原样存回服务器（服务器刚被清空，不留空表），
+            // 画面仍是旧列表，与服务器保持一致。
+            _ = try? await CloudflareClient.shared.saveAlerts(
+                baseURL: baseURL,
+                token: token,
+                alerts: previousAlerts,
+                step: previousStep
+            )
+            alertsDirty = wasDirty
+            step = previousStep
             persistState()
-            showToast("已生成，但保存到网站失败：\(error.localizedDescription)", error: true)
+            showToast(error.localizedDescription, error: true)
         }
     }
 
