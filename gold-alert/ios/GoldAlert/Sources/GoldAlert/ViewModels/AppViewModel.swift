@@ -5,8 +5,6 @@ import SwiftUI
 final class AppViewModel: ObservableObject {
     static let maxAlerts = 15
     static let stepChoices: [Double] = [1, 2, 3, 4, 5, 10]
-    static let pollChoices: [Double] = [0.5, 1, 2, 3, 5, 10, 15, 30]
-    private static let pollSecondsKey = "pricePollSeconds"
 
     @Published var isUnlocked = false
     @Published var tokenInput = ""
@@ -16,10 +14,7 @@ final class AppViewModel: ObservableObject {
     @Published var toastIsError = false
     @Published var doneFlash = false
 
-    @Published var quote = Quote.empty
-    @Published var lastRefreshText = "--"
     @Published var step: Double = 5
-    @Published var pollSeconds: Double = AppViewModel.loadPollSeconds()
     @Published var alerts: [AlertItem] = []
     @Published var alertsPaused = false
     @Published var alertsDirty = false
@@ -28,15 +23,11 @@ final class AppViewModel: ObservableObject {
 
     private var token = KeychainStore.readToken()
     private var baseURL = KeychainStore.readBaseURL()
-    /// EA 推送到服务器、由 /api/status 带回的价格。默认价格来源就是它
-    /// （与网页版显示和「设定」用的 spotPrice 同源）；现货报价只作兜底。
+    /// EA 推送到服务器、由 /api/status 带回的价格——价格的唯一来源（不再用 Swissquote 金价）。
     @Published private(set) var eaPrice: Double = 0
 
-    /// 画面与生成用的当前价：EA 在线时用 EA 推送价，EA 掉线/尚无推送时才用现货价。
-    var displayPrice: Double {
-        (eaOnline && eaPrice > 0) ? eaPrice : quote.price
-    }
-    private var priceTask: Task<Void, Never>?
+    /// 画面显示与生成网格用的当前价：完全用 EA 推送价（尚无推送时为 0，画面显示 --）。
+    var displayPrice: Double { eaPrice }
     private var cloudTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
     private var doneFlashTask: Task<Void, Never>?
@@ -55,36 +46,6 @@ final class AppViewModel: ObservableObject {
         if let s = LocalCache.loadStep() { step = s }
         if let p = LocalCache.loadPaused() { alertsPaused = p }
         if let o = LocalCache.loadOnline() { eaOnline = o }
-    }
-
-    func setPollSeconds(_ seconds: Double) {
-        let allowed = Self.pollChoices
-        let value = allowed.min(by: { abs($0 - seconds) < abs($1 - seconds) }) ?? 1
-        pollSeconds = value
-        UserDefaults.standard.set(value, forKey: Self.pollSecondsKey)
-        if isUnlocked {
-            startLoops()
-        }
-        showToast("刷新间隔 \(Self.pollLabel(value))", error: false)
-    }
-
-    private static func loadPollSeconds() -> Double {
-        let stored = UserDefaults.standard.object(forKey: pollSecondsKey) as? Double
-        let value = stored ?? 1
-        if pollChoices.contains(where: { abs($0 - value) < 1e-9 }) {
-            return value
-        }
-        return 1
-    }
-
-    private static func pollLabel(_ seconds: Double) -> String {
-        if seconds < 1 {
-            return String(format: "%.1f 秒", seconds)
-        }
-        if abs(seconds - seconds.rounded()) < 1e-9 {
-            return "\(Int(seconds)) 秒"
-        }
-        return String(format: "%.1f 秒", seconds)
     }
 
     func onAppear() {
@@ -130,7 +91,7 @@ final class AppViewModel: ObservableObject {
         token = ""
         tokenInput = ""
         alerts = []
-        quote = .empty
+        eaPrice = 0
         isUnlocked = false
         authError = nil
         LocalCache.clear()
@@ -139,14 +100,7 @@ final class AppViewModel: ObservableObject {
     func startLoops() {
         stopLoops()
         Task { await refreshCloudState() }
-        let nanos = UInt64(max(pollSeconds, 0.5) * 1_000_000_000)
-        priceTask = Task { [weak self] in
-            while !Task.isCancelled {
-                await self?.refreshSwissquote()
-                try? await Task.sleep(nanoseconds: nanos)
-            }
-        }
-        // 定时刷新云端状态：EA 在线小圆点（连上后变绿）、已触发的行变成“已用”。
+        // 定时刷新云端状态：EA 推送价格、在线小圆点（连上后变绿）、已触发的行变成“已用”。
         let cloudNanos = UInt64(Self.cloudPollSeconds * 1_000_000_000)
         cloudTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -157,8 +111,6 @@ final class AppViewModel: ObservableObject {
     }
 
     func stopLoops() {
-        priceTask?.cancel()
-        priceTask = nil
         cloudTask?.cancel()
         cloudTask = nil
     }
@@ -174,18 +126,6 @@ final class AppViewModel: ObservableObject {
         LocalCache.saveStep(step)
         LocalCache.savePaused(alertsPaused)
         LocalCache.saveOnline(eaOnline)
-    }
-
-    /// Swissquote is display-only on device. Cloudflare only gets alert/settings for the EA.
-    func refreshSwissquote() async {
-        guard isUnlocked else { return }
-        do {
-            let q = try await SwissquoteClient.shared.fetchQuote()
-            quote = q
-            lastRefreshText = "现货 " + Self.clockString()
-        } catch {
-            // 切入画面/后台刷新失败不弹红色错误提示；循环会继续自动重试。
-        }
     }
 
     func refreshCloudState() async {
@@ -230,88 +170,68 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// 间隔下拉改动后立刻生效。整个流程在后台进行，画面旧列表保持不动，最后一次性替换。
+    /// 间隔下拉改动后立刻生效：不再用服务器的生成接口（它在已有设定时只会把新旧
+    /// 网格混在一起改一部分），改由本地按间隔逻辑直接算出完整网格，一次保存覆盖服务器。
     ///
-    /// 顺序是实测（视频）定死的：服务器的生成接口在列表非空时只会原样返回现有设定
-    /// （“完成”会闪、数字却不变），只有先把服务器上的设定清空、再调生成，才会真正
-    /// 按新间隔生成新网格。所以必须：①先清服务器（本地画面不清空）→ ②生成 → ③一次性显示。
-    /// 两次请求紧挨着完成，EA 每 3 秒才同步一次，基本不会取到中间的空档；
-    /// 生成若失败，会把旧设定原样存回服务器，不留空表。
+    /// 间隔逻辑（ren 定版）：以当前 EA 价格取整为中心点，从中心向前、向后各按间隔
+    /// 空出点数设定，前后各 7 个、加上中心共 15 个；除中心点外其余全部设为有效（触发），
+    /// 中心点设为关闭（现价就在该点上，避免立即触发）。
+    /// 全过程画面保持旧列表不动，保存成功后一次性替换；失败则什么都不变。
     func applyStep(_ value: Double) async {
         let previousStep = step
-        let previousAlerts = alerts
         let wasDirty = alertsDirty
         step = value
         persistState()
 
         busy = true
         defer { busy = false }
-        // 全程锁定列表：轮询不许动 alerts（尤其不许把服务器清空瞬间的空表刷到画面上），
-        // busy 同时挡住轮询用服务器旧 step 覆盖刚选的新间隔。
         alertsDirty = true
 
-        // 建网格用的价格：默认用 EA 推送到服务器的价格——先刷新一次状态拿到最新值
-        //（网页版「设定」用的正是这个价；服务器生成也是以 EA 价格为准的，
-        // 喂它现货价可能就是此前生成不生效的原因之一）。EA 价格拿不到才用现货价兜底。
+        // 价格完全用 EA 推送价：先刷新一次状态拿到最新推送价。
         await refreshCloudState()
-        var price: Double = (eaOnline && eaPrice > 0) ? eaPrice : 0
-        if price <= 0 {
-            if !quote.isValid {
-                await refreshSwissquote()
-            }
-            price = quote.price
-        }
+        let price = eaPrice
         guard price > 0 else {
             alertsDirty = wasDirty
             step = previousStep
             persistState()
-            showToast("还没有现货价格", error: true)
+            showToast("还没有 EA 价格", error: true)
             return
         }
 
-        // 第一步：把服务器上的现有设定清空（只动服务器，本地画面保持旧列表）。
+        let grid = Self.buildGrid(centerPrice: price, step: value)
         do {
-            _ = try await CloudflareClient.shared.saveAlerts(
+            let data = try await CloudflareClient.shared.saveAlerts(
                 baseURL: baseURL,
                 token: token,
-                alerts: [],
+                alerts: grid,
                 step: value
             )
-        } catch {
-            alertsDirty = wasDirty
-            step = previousStep
-            persistState()
-            showToast(error.localizedDescription, error: true)
-            return
-        }
-
-        // 第二步：在空列表上生成新网格（生成接口此时才会真正按新间隔生成），
-        // 成功后一次性替换显示。生成结果即服务器的最终设定，不再额外多存一次。
-        do {
-            let data = try await CloudflareClient.shared.autoGenerate(
-                baseURL: baseURL,
-                token: token,
-                step: value,
-                price: price
-            )
+            // 一次性替换显示：优先用服务器回显（带 id），没有就用本地算好的网格。
             alerts = (data.alerts ?? []).map { $0.asItem() }
-            if let s = data.step, s > 0 { step = s } else { step = value }
+            if alerts.isEmpty { alerts = grid }
             alertsDirty = false
             persistState()
             flashDone()
         } catch {
-            // 生成失败：把旧设定原样存回服务器（服务器刚被清空，不留空表），
-            // 画面仍是旧列表，与服务器保持一致。
-            _ = try? await CloudflareClient.shared.saveAlerts(
-                baseURL: baseURL,
-                token: token,
-                alerts: previousAlerts,
-                step: previousStep
-            )
             alertsDirty = wasDirty
             step = previousStep
             persistState()
             showToast(error.localizedDescription, error: true)
+        }
+    }
+
+    /// 按间隔逻辑本地生成网格：中心 = 当前价取整；中心 ± 间隔×1..7；升序排列；
+    /// 中心点关闭（enabled=false），其余全部触发（enabled=true），均未触发过。
+    private static func buildGrid(centerPrice: Double, step: Double) -> [AlertItem] {
+        let center = centerPrice.rounded()
+        return (-7...7).map { offset in
+            let point = center + Double(offset) * step
+            return AlertItem(
+                id: nil,
+                priceText: String(format: "%.2f", point),
+                enabled: offset != 0,
+                triggered: false
+            )
         }
     }
 
@@ -427,10 +347,4 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    private static func clockString() -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "zh_CN")
-        f.dateFormat = "HH:mm:ss"
-        return f.string(from: Date())
-    }
 }

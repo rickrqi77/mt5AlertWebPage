@@ -6,7 +6,6 @@ struct MainView: View {
     @StateObject private var liquidation = LiquidationViewModel()
     @State private var confirmClear = false
     @State private var confirmSaveEmpty = false
-    @State private var showPollPicker = false
     /// 已自动定位过的提醒列表签名（价格序列）；同一列表只自动滚一次，避免轮询/现价跳动反复抢滚动。
     @State private var scrolledSignature = ""
     /// 实测相邻两行的行距（行高+间隔），用于精确算出「正好 11 行」的列表高度。
@@ -46,18 +45,6 @@ struct MainView: View {
         ) {
             Button("仍要保存") {
                 Task { await model.saveAlerts() }
-            }
-            Button("取消", role: .cancel) {}
-        }
-        .confirmationDialog(
-            "价格刷新间隔",
-            isPresented: $showPollPicker,
-            titleVisibility: .visible
-        ) {
-            ForEach(AppViewModel.pollChoices, id: \.self) { seconds in
-                Button(Self.pollLabel(seconds)) {
-                    model.setPollSeconds(seconds)
-                }
             }
             Button("取消", role: .cancel) {}
         }
@@ -102,25 +89,20 @@ struct MainView: View {
     private var priceHero: some View {
         VStack(spacing: 3) {
             // 不再单独占一行显示 XAUUSD：只剩价格行，接通状态点（绿/红）放在价格右边。
+            // 价格完全按 EA 推送显示，不可点击（已取消点价格改刷新间隔的功能）。
             ZStack {
-                Button {
-                    showPollPicker = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Text(format(model.displayPrice))
-                            .font(.system(size: 32, weight: .bold).monospacedDigit())
-                            .foregroundStyle(.white)
-                        Circle()
-                            .fill(model.eaOnline
-                                  ? Color(red: 0.3, green: 0.75, blue: 0.45)
-                                  : Color(red: 0.9, green: 0.3, blue: 0.28))
-                            .frame(width: 9, height: 9)
-                            .accessibilityLabel(model.eaOnline ? "EA 在线" : "EA 离线")
-                    }
-                    .frame(maxWidth: .infinity)
+                HStack(spacing: 8) {
+                    Text(format(model.displayPrice))
+                        .font(.system(size: 32, weight: .bold).monospacedDigit())
+                        .foregroundStyle(.white)
+                    Circle()
+                        .fill(model.eaOnline
+                              ? Color(red: 0.3, green: 0.75, blue: 0.45)
+                              : Color(red: 0.9, green: 0.3, blue: 0.28))
+                        .frame(width: 9, height: 9)
+                        .accessibilityLabel(model.eaOnline ? "EA 在线" : "EA 离线")
                 }
-                .buttonStyle(.plain)
-                .accessibilityHint("点按设置价格刷新间隔")
+                .frame(maxWidth: .infinity)
 
                 HStack {
                     Spacer(minLength: 0)
@@ -329,15 +311,5 @@ struct MainView: View {
     private func formatFinalPrice(_ value: Double) -> String {
         guard value > 0 else { return "0" }
         return String(format: "%.2f", value)
-    }
-
-    private static func pollLabel(_ seconds: Double) -> String {
-        if seconds < 1 {
-            return String(format: "%.1f 秒", seconds)
-        }
-        if abs(seconds - seconds.rounded()) < 1e-9 {
-            return "\(Int(seconds)) 秒"
-        }
-        return String(format: "%.1f 秒", seconds)
     }
 }
