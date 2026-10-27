@@ -17,8 +17,9 @@ struct MainView: View {
         VStack(alignment: .leading, spacing: 6) {
             header
             priceHero
-            toolbarRow
+            // 提醒区域在上、按钮区（间隔/保存/清除）在最底部——两者对调（ren 23:10）。
             alertsPanel
+            toolbarRow
         }
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -103,18 +104,21 @@ struct MainView: View {
             // 不再单独占一行显示 XAUUSD：只剩价格行，接通状态点（绿/红）放在价格右边。
             // 价格完全按 EA 推送显示，不可点击（已取消点价格改刷新间隔的功能）。
             ZStack {
-                HStack(spacing: 8) {
-                    Text(format(model.displayPrice))
-                        .font(.system(size: 32, weight: .bold).monospacedDigit())
-                        .foregroundStyle(.white)
-                    Circle()
-                        .fill(model.eaOnline
-                              ? Color(red: 0.3, green: 0.75, blue: 0.45)
-                              : Color(red: 0.9, green: 0.3, blue: 0.28))
-                        .frame(width: 9, height: 9)
-                        .accessibilityLabel(model.eaOnline ? "EA 在线" : "EA 离线")
-                }
-                .frame(maxWidth: .infinity)
+                // 实时价格只按数字本身居中（圆点不参与居中计算）：
+                // Text 作为 ZStack 直接子视图被居中，圆点用 overlay 贴在数字
+                // 右边缘再往右一点的位置。
+                Text(format(model.displayPrice))
+                    .font(.system(size: 32, weight: .bold).monospacedDigit())
+                    .foregroundStyle(.white)
+                    .overlay(alignment: .trailing) {
+                        Circle()
+                            .fill(model.eaOnline
+                                  ? Color(red: 0.3, green: 0.75, blue: 0.45)
+                                  : Color(red: 0.9, green: 0.3, blue: 0.28))
+                            .frame(width: 9, height: 9)
+                            .offset(x: 22)
+                            .accessibilityLabel(model.eaOnline ? "EA 在线" : "EA 离线")
+                    }
 
                 HStack {
                     Spacer(minLength: 0)
@@ -162,7 +166,7 @@ struct MainView: View {
             } label: {
                 Text(String(Int(model.step)))
                     .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 32)
+                    .frame(maxWidth: .infinity, minHeight: 40)
                     .background(Color.white.opacity(0.1))
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -178,7 +182,7 @@ struct MainView: View {
             } label: {
                 Text("保存")
                     .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 32)
+                    .frame(maxWidth: .infinity, minHeight: 40)
                     .background(Color(red: 0.83, green: 0.63, blue: 0.09))
                     .foregroundStyle(.black)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -190,7 +194,7 @@ struct MainView: View {
             } label: {
                 Text("清除")
                     .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 32)
+                    .frame(maxWidth: .infinity, minHeight: 40)
                     .background(Color(red: 0.75, green: 0.22, blue: 0.17))
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -272,7 +276,8 @@ struct MainView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             ZStack {
-                RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04))
+                // 提醒区域不要底色，就是背景黑（ren 23:10 定版）。
+                Color.black
                 // 实测面板高度，供行间隔按可用空间自动拉开（见 effectiveRowSpacing）。
                 GeometryReader { geo in
                     Color.clear

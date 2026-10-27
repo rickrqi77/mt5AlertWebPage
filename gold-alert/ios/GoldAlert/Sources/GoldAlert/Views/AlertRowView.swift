@@ -42,48 +42,46 @@ struct AlertRowView: View {
                 )
                 .opacity(dragOffset == 0 ? 0 : 1)
 
-            HStack(spacing: 6) {
-                // 序号加回来（盈亏框缩窄后有空间了）：只显示数字，不带句号。
+            HStack(spacing: 8) {
+                // 序号：只显示数字、不带句号；最多两位，固定尺寸保证显示完整不截断。
                 Text("\(index + 1)")
                     .font(.body.monospacedDigit())
                     .foregroundStyle(Color.white.opacity(0.45))
-                    .frame(width: 22, alignment: .leading)
+                    .frame(width: 26, alignment: .leading)
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .layoutPriority(2)
 
-                // 价格框：缩到正好放下数字。
+                // 价格数字：无背景框，直接黑底（整行不要背景色，ren 23:10 定版）。
                 SelectAllPriceField(text: priceBinding)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 7)
-                .frame(minWidth: 112, maxWidth: 112, minHeight: 36, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+                .frame(minWidth: 108, maxWidth: 108, minHeight: 36, alignment: .leading)
 
-                // 盈亏数字：价格与触发按钮之间，显示两位小数；框缩窄到正好
-                // 放下「4 位整数 + 两位小数」（如 4452.00，含负号也放得下）。
+                // 盈亏数字：价格与触发按钮之间，显示两位小数，无背景框。
+                // 宽度给足以原字体大小完整显示大数字（如 -12345.67），不许缩小字体。
                 // 通知价/平均价/手数/汇率任一变化，画面重算后立刻跟着变
                 //（值由 MainView 按模式公式算好传入）。
                 Text(pnlText)
                     .font(.body.monospacedDigit().weight(.semibold))
                     .foregroundStyle(pnlColor)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .padding(.horizontal, 8)
                     .padding(.vertical, 7)
-                    .frame(minWidth: 94, maxWidth: 94, minHeight: 36, alignment: .center)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+                    .frame(minWidth: 100, maxWidth: 100, minHeight: 36, alignment: .leading)
 
                 Spacer(minLength: 0)
 
-                // 触发按钮固定在这一行最右边、右对齐。
+                // 触发按钮：宽一点，固定在这一行最右边、右对齐。
                 Button(armTitle) { onToggleArm() }
                     .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, 15)
                     .padding(.vertical, 7)
+                    .frame(minWidth: 74)
                     .background(RoundedRectangle(cornerRadius: 8).fill(armColor))
                     .foregroundStyle(.white)
             }
-            // 行自身的不透明底色（与面板在黑底上的合成色一致），盖住底下的删除区；
-            // 滑动时整行横移、删除区才露出来。
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color(white: 0.04)))
+            // 行底色就是纯黑（盖住底下的滑动删除区；滑动时整行横移、删除区才露出来）。
+            .background(Color.black)
             .offset(x: dragOffset)
         }
         .contentShape(Rectangle())
