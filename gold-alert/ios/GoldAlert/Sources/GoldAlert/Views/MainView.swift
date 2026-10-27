@@ -116,10 +116,10 @@ struct MainView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "bell.badge.fill")
-                        .font(.system(size: 20))
+                        .font(.system(size: 24))
                         .foregroundStyle(Color.appAccentText)
                     Text("提醒事项")
-                        .font(.system(size: 20, weight: .bold))
+                        .font(.system(size: 24, weight: .bold))
                         .foregroundStyle(Color.appAccentText)
                 }
             }
@@ -231,11 +231,7 @@ struct MainView: View {
                         .foregroundStyle(.primary)
                 }
                 Spacer()
-                Text("触发 \(model.armedCount) / \(model.alerts.count)")
-                    .font(.caption)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.primary.opacity(0.08)))
+                // 右上角的「触发 n / 总数」计数不再显示（ren 2026-10-28 要求去掉）。
             }
 
             if model.alerts.isEmpty {

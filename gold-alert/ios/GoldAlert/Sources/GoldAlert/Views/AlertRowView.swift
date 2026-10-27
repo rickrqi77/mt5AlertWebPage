@@ -63,11 +63,15 @@ struct AlertRowView: View {
             Button(armTitle) { onToggleArm() }
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 15)
-                .padding(.vertical, 7)
+                .padding(.vertical, 5)
                 .frame(minWidth: 74)
                 .background(RoundedRectangle(cornerRadius: 8).fill(armColor))
                 .foregroundStyle(armForeground)
         }
+        // 每行统一的上下内边距：内容（尤其触发按钮）不再撑满整行高度，
+        // 与上下分割线之间留出一致的空隙，每行间距看起来就一样了
+        //（ren 2026-10-28）。行高变大由 MainView 的实测自动适配。
+        .padding(.vertical, 6)
         // 行底色与画面背景同色（深色黑/浅色白，随系统外观）。
         .background(Color(uiColor: .systemBackground))
         // 行间分割线（ren 2026-10-28 要求）：每一行下方画一条线，第一行上方
