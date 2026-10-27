@@ -76,7 +76,7 @@ struct AlertRowView: View {
         .background(Color(uiColor: .systemBackground))
         // 行间分割线（ren 2026-10-28 要求）：每一行下方画一条线，第一行上方
         // 也画一条（最后一行下方的线就是它自己的底线）。用 overlay 画，
-        // 不占布局尺寸，不影响行高实测与 11 行可视高度。
+        // 不占布局尺寸，不影响行高实测与可视高度。
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.primary.opacity(0.25))

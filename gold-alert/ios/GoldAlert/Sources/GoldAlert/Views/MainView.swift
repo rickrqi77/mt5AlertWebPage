@@ -268,8 +268,8 @@ struct MainView: View {
                     }
                 }
                 .coordinateSpace(name: "alertRows")
-                // 高度正好容纳 11 行整行：默认完整显示 11 个，超出的在列表内滑动，
-                // 不会出现最后一行只露一半。面板比 11 行紧凑高度更高时（大屏），
+                // 高度正好容纳 10 行整行：默认完整显示 10 个，超出的在列表内滑动，
+                // 不会出现最后一行只露一半。面板比 10 行紧凑高度更高时（大屏），
                 // 多出的高度平摊进行间隔里（effectiveRowSpacing），下方不留空。
                 .frame(height: visibleRowsHeight)
                 .onPreferenceChange(RowOriginsKey.self) { origins in
@@ -302,7 +302,7 @@ struct MainView: View {
         )
     }
 
-    /// 实际行间隔：先按紧凑值排 11 行，面板还有多余高度时把多余部分
+    /// 实际行间隔：先按紧凑值排 10 行，面板还有多余高度时把多余部分
     /// 平摊到各行之间（间隔拉大一点点、整屏铺满，下方不空），封顶 maxRowSpacing；
     /// 小屏没有多余高度时就用紧凑值。小屏/大屏（含 iPhone 17）都自适应，不写死机型。
     private var effectiveRowSpacing: CGFloat {
@@ -315,7 +315,7 @@ struct MainView: View {
         return min(Self.minRowSpacing + spread, Self.maxRowSpacing)
     }
 
-    /// 列表可视高度：最多 11 行整行（n 行内容 + n−1 个实际间隔）。
+    /// 列表可视高度：最多 10 行整行（n 行内容 + n−1 个实际间隔）。
     private var visibleRowsHeight: CGFloat {
         let n = min(model.alerts.count, Self.maxVisibleAlertRows)
         guard n > 0 else { return 0 }
@@ -323,7 +323,7 @@ struct MainView: View {
     }
 
     /// 默认完整显示的行数，其余滑动查看。
-    private static let maxVisibleAlertRows = 11
+    private static let maxVisibleAlertRows = 10
     /// 紧凑行间隔（可用空间不足时的下限，与改版前一致，保证小屏不溢出）。
     private static let minRowSpacing: CGFloat = 8
     /// 行间隔封顶，避免行数很少时被拉得太开。
