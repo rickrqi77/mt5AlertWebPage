@@ -316,10 +316,14 @@ struct MainView: View {
     }
 
     /// 列表可视高度：最多 9 行整行（n 行内容 + n−1 个实际间隔）。
+    /// 无论行高实测值如何，都绝不超过面板实际可用高度——画面总高因此
+    /// 永远收在安全区内，不会顶到状态栏（ren 2026-10-28 要求）。
     private var visibleRowsHeight: CGFloat {
         let n = min(model.alerts.count, Self.maxVisibleAlertRows)
         guard n > 0 else { return 0 }
-        return CGFloat(n) * alertRowHeight + CGFloat(n - 1) * effectiveRowSpacing
+        let desired = CGFloat(n) * alertRowHeight + CGFloat(n - 1) * effectiveRowSpacing
+        guard alertsPanelHeight > 0 else { return desired }
+        return min(desired, max(0, alertsPanelHeight - Self.panelChromeHeight))
     }
 
     /// 默认完整显示的行数，其余滑动查看。
