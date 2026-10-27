@@ -107,7 +107,7 @@ struct MainView: View {
                     showPollPicker = true
                 } label: {
                     HStack(spacing: 8) {
-                        Text(format(model.quote.price))
+                        Text(format(model.displayPrice))
                             .font(.system(size: 32, weight: .bold).monospacedDigit())
                             .foregroundStyle(.white)
                         Circle()
@@ -264,7 +264,7 @@ struct MainView: View {
                     }
                     .onAppear { scrollToNearestAlert(proxy: rowProxy) }
                     .onChange(of: model.alerts) { _, _ in scrollToNearestAlert(proxy: rowProxy) }
-                    .onChange(of: model.quote.price) { _, _ in scrollToNearestAlert(proxy: rowProxy) }
+                    .onChange(of: model.displayPrice) { _, _ in scrollToNearestAlert(proxy: rowProxy) }
                 }
             }
         }
@@ -279,7 +279,7 @@ struct MainView: View {
     /// 只对「新的一份价格列表」定位一次：本地编辑中（alertsDirty）不抢滚动，
     /// 云端轮询带回相同价格、现价小幅跳动也不反复滚动。
     private func scrollToNearestAlert(proxy: ScrollViewProxy) {
-        guard !model.alertsDirty, model.quote.price > 0, !model.alerts.isEmpty else { return }
+        guard !model.alertsDirty, model.displayPrice > 0, !model.alerts.isEmpty else { return }
         let signature = model.alerts.map(\.priceText).joined(separator: "|")
         guard signature != scrolledSignature else { return }
         guard let target = nearestAlertIndex else { return }
@@ -309,7 +309,7 @@ struct MainView: View {
     }
 
     private var nearestAlertIndex: Int? {
-        let price = model.quote.price
+        let price = model.displayPrice
         guard price > 0 else { return nil }
         return model.alerts.enumerated()
             .min(by: {

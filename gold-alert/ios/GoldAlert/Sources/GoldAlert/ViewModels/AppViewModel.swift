@@ -28,9 +28,14 @@ final class AppViewModel: ObservableObject {
 
     private var token = KeychainStore.readToken()
     private var baseURL = KeychainStore.readBaseURL()
-    /// 服务器 /api/status 带回的 EA 价格（与网页版「设定」用的 spotPrice 同源），
-    /// 现货报价取不到时生成提醒网格用它兜底。
-    private var lastEAStatusPrice: Double = 0
+    /// EA 推送到服务器、由 /api/status 带回的价格。默认价格来源就是它
+    /// （与网页版显示和「设定」用的 spotPrice 同源）；现货报价只作兜底。
+    @Published private(set) var eaPrice: Double = 0
+
+    /// 画面与生成用的当前价：EA 在线时用 EA 推送价，EA 掉线/尚无推送时才用现货价。
+    var displayPrice: Double {
+        (eaOnline && eaPrice > 0) ? eaPrice : quote.price
+    }
     private var priceTask: Task<Void, Never>?
     private var cloudTask: Task<Void, Never>?
     private var toastTask: Task<Void, Never>?
@@ -195,7 +200,7 @@ final class AppViewModel: ObservableObject {
             let remoteDTOs = status.alerts ?? alertsPayload.alerts
             eaOnline = status.ea_online == true
             alertsPaused = status.paused == true || status.alerts_enabled == false
-            if let p = status.price, p > 0 { lastEAStatusPrice = p }
+            if let p = status.price, p > 0 { eaPrice = p }
             // 生成/保存进行中不要用服务器的旧 step 覆盖用户刚选的新间隔。
             if !busy, let s = status.step, s > 0 { step = s }
             if !alertsDirty {
@@ -245,16 +250,16 @@ final class AppViewModel: ObservableObject {
         // busy 同时挡住轮询用服务器旧 step 覆盖刚选的新间隔。
         alertsDirty = true
 
-        // 建网格用的价格：先现货价；取不到就先刷新一次，再用服务器带回的 EA 价格兜底
-        //（网页版「设定」用的正是 /api/status 的 EA 价格）。都没有才提示。
-        var price = quote.price
-        if !quote.isValid {
-            await refreshSwissquote()
-            price = quote.price
-        }
+        // 建网格用的价格：默认用 EA 推送到服务器的价格——先刷新一次状态拿到最新值
+        //（网页版「设定」用的正是这个价；服务器生成也是以 EA 价格为准的，
+        // 喂它现货价可能就是此前生成不生效的原因之一）。EA 价格拿不到才用现货价兜底。
+        await refreshCloudState()
+        var price: Double = (eaOnline && eaPrice > 0) ? eaPrice : 0
         if price <= 0 {
-            await refreshCloudState()
-            price = lastEAStatusPrice
+            if !quote.isValid {
+                await refreshSwissquote()
+            }
+            price = quote.price
         }
         guard price > 0 else {
             alertsDirty = wasDirty
