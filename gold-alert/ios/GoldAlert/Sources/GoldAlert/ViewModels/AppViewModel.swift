@@ -212,32 +212,23 @@ final class AppViewModel: ObservableObject {
     }
 
     /// 间隔下拉改动后立刻生效，固定流程：先自动清除、再生成（ren 实测确认的正确顺序）：
-    /// 在旧设定上直接生成不生效——必须先把本地和服务器上的现有设定清空，
+    /// 在旧设定上直接生成不生效——必须先把本地现有设定清空，
     /// 再按新间隔 + 当前价生成新网格（原「设定」按钮的动作），生成结果随即保存到服务器。
+    /// 注意：清除只清本地、不往服务器推空表——否则 EA 会先收到一次空设定、随后又收到新设定，
+    /// 白白多同步一次；整个改间隔过程只在生成完成后推送一次最终结果。
     func applyStep(_ value: Double) async {
         step = value
         persistState()
         busy = true
         defer { busy = false }
-        await clearAlertsForRegenerate(step: value)
+        clearLocalAlertsForRegenerate()
         await autoGenerate()
     }
 
-    /// 改间隔专用清除：清空本地列表，并把空列表连同新间隔先存到服务器（不弹「已全部清除」提示）。
-    /// 清除请求失败也不阻断后面的生成——生成完成时的保存会把服务器设定整表覆盖为新网格。
-    private func clearAlertsForRegenerate(step stepToUse: Double) async {
+    /// 改间隔专用清除：只清空本地列表并锁定（轮询不许用服务器旧设定盖回），不推送空表到服务器。
+    private func clearLocalAlertsForRegenerate() {
         alerts = []
         alertsDirty = true
-        do {
-            _ = try await CloudflareClient.shared.saveAlerts(
-                baseURL: baseURL,
-                token: token,
-                alerts: [],
-                step: stepToUse
-            )
-        } catch {
-            // 静默继续生成：最终保存会覆盖服务器设定。
-        }
         persistState()
     }
 
