@@ -9,6 +9,8 @@ struct MainView: View {
     @State private var showPollPicker = false
     /// 已自动定位过的提醒列表签名（价格序列）；同一列表只自动滚一次，避免轮询/现价跳动反复抢滚动。
     @State private var scrolledSignature = ""
+    /// 实测相邻两行的行距（行高+间隔），用于精确算出「正好 11 行」的列表高度。
+    @State private var alertRowPitch: CGFloat = 44
 
     var body: some View {
         // 无外层滚动条：整屏紧凑排版一屏装下，提醒行多时只在面板内部滚动。
@@ -230,7 +232,7 @@ struct MainView: View {
             } else {
                 ScrollViewReader { rowProxy in
                     ScrollView(.vertical, showsIndicators: true) {
-                        LazyVStack(alignment: .leading, spacing: 8) {
+                        LazyVStack(alignment: .leading, spacing: Self.alertRowSpacing) {
                             ForEach(Array(model.alerts.enumerated()), id: \.element.localID) { index, item in
                                 AlertRowView(
                                     index: index,
@@ -240,7 +242,24 @@ struct MainView: View {
                                     onDelete: { model.deleteAlert(at: index) }
                                 )
                                 .id(index)
+                                .background(
+                                    GeometryReader { geo in
+                                        Color.clear.preference(
+                                            key: RowOriginsKey.self,
+                                            value: [index: geo.frame(in: .named("alertRows")).minY]
+                                        )
+                                    }
+                                )
                             }
+                        }
+                    }
+                    .coordinateSpace(name: "alertRows")
+                    // 高度正好容纳 11 行整行：默认完整显示 11 个，超出的在列表内滑动，
+                    // 不会出现最后一行只露一半。
+                    .frame(height: visibleRowsHeight)
+                    .onPreferenceChange(RowOriginsKey.self) { origins in
+                        if let y0 = origins[0], let y1 = origins[1], y1 > y0 {
+                            alertRowPitch = y1 - y0
                         }
                     }
                     .onAppear { scrollToNearestAlert(proxy: rowProxy) }
@@ -267,6 +286,25 @@ struct MainView: View {
         scrolledSignature = signature
         DispatchQueue.main.async {
             proxy.scrollTo(target, anchor: .center)
+        }
+    }
+
+    /// 列表可视高度：最多 11 行整行（n 行 = n × 行距 − 1 个间隔，行距由前两行原点实测）。
+    private var visibleRowsHeight: CGFloat {
+        let n = min(model.alerts.count, Self.maxVisibleAlertRows)
+        guard n > 0 else { return 0 }
+        return CGFloat(n) * alertRowPitch - Self.alertRowSpacing
+    }
+
+    /// 默认完整显示的行数，其余滑动查看。
+    private static let maxVisibleAlertRows = 11
+    private static let alertRowSpacing: CGFloat = 8
+
+    /// 收集每行在滚动区坐标系中的顶部 Y，用于实测相邻两行的行距。
+    private struct RowOriginsKey: PreferenceKey {
+        static let defaultValue: [Int: CGFloat] = [:]
+        static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
+            value.merge(nextValue()) { _, new in new }
         }
     }
 
