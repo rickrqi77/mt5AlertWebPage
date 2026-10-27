@@ -8,8 +8,9 @@ struct GoldAlertApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(model)
-            // 不再强制深色：跟随系统外观设定，浅色/深色自动切换
-            //（各画面颜色已改用自适应颜色，ren 2026-10-28 要求）。
+                // 画面固定深色模式，不管系统外观如何设定（ren 2026-10-28 改定，
+                // 覆盖此前「跟随系统」的决定）。
+                .preferredColorScheme(.dark)
         }
     }
 }

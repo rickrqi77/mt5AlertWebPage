@@ -18,8 +18,6 @@ struct AlertRowView: View {
     /// 只记进度不记价格本身，价格始终以模型为准）。
     @State private var swipeStartPrice: Double?
     @State private var swipeStepsApplied = 0
-    /// 外观（浅色/深色）：盈亏正数的颜色两种模式不同，见 pnlColor。
-    @Environment(\.colorScheme) private var colorScheme
 
     /// 价格字段直接读写模型：读 = item.priceText，写 = 用户编辑时回传模型。
     private var priceBinding: Binding<String> {
@@ -125,10 +123,8 @@ struct AlertRowView: View {
     private var pnlColor: Color {
         guard let pnl else { return .secondary }
         if pnl > 0 {
-            // 正数：深色用绿色，浅色用蓝色（ren 2026-10-28 定）。
-            return colorScheme == .light
-                ? Color(uiColor: .systemBlue)
-                : Color(red: 0.3, green: 0.75, blue: 0.45)
+            // 正数用蓝色（系统蓝）：原深色绿/浅色蓝，ren 2026-10-28 改定统一蓝色系。
+            return Color(uiColor: .systemBlue)
         }
         if pnl < 0 { return Color(red: 0.9, green: 0.4, blue: 0.35) }
         return Color.primary.opacity(0.55)

@@ -11,13 +11,10 @@ extension Color {
             : UIColor(red: 0.55, green: 0.40, blue: 0.0, alpha: 1)
     })
 
-    /// 强调文字色（ren 2026-10-28 定，后又改定深色为绿）：最终价、
-    /// 左上角「提醒事项」与铃铛图标——深色模式绿色，浅色模式蓝色（系统蓝）。
-    static let appAccentText = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.3, green: 0.75, blue: 0.45, alpha: 1)
-            : UIColor.systemBlue
-    })
+    /// 强调文字色：最终价、左上角「提醒事项」与铃铛图标。
+    /// 原为深色绿/浅色蓝，ren 2026-10-28 改定：统一用蓝色系（系统蓝），
+    /// 且画面已固定深色模式，此色在黑底上就是系统蓝。
+    static let appAccentText = Color(uiColor: .systemBlue)
 
     /// 画面背景（ren 2026-10-28 定）：深色模式纯黑；浅色模式不用纯白，
     /// 亮度稍微压低一点点（0.93 的浅灰）。
@@ -27,11 +24,7 @@ extension Color {
             : UIColor(white: 0.93, alpha: 1)
     })
 
-    /// 按钮底色（ren 2026-10-28 定）：保存按钮与提醒按钮统一用它、配白字——
-    /// 深色模式绿色，浅色模式蓝色（系统蓝）。
-    static let appButton = Color(UIColor { traits in
-        traits.userInterfaceStyle == .dark
-            ? UIColor(red: 0.18, green: 0.55, blue: 0.34, alpha: 1)
-            : UIColor.systemBlue
-    })
+    /// 按钮底色：保存按钮与提醒按钮统一用它、配白字。
+    /// 原为深色绿/浅色蓝，ren 2026-10-28 改定：统一用蓝色系（系统蓝）。
+    static let appButton = Color(uiColor: .systemBlue)
 }
