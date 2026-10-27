@@ -327,17 +327,19 @@ struct MainView: View {
         }
     }
 
-    /// 每行盈亏数字（ren 定版公式）：价格到达这一行通知价时，持仓是盈是亏。
-    /// 美元模式：(平均价 − 通知价格) × 合计手数 × 100；
-    /// 日元模式：(平均价 − 通知价格) × 合计手数 × 100 ÷ 美日实时汇率；
-    /// 持仓是 sell 时，结果再乘 −1 才显示（buy 不变）。结果显示两位小数（行内格式化）。
+    /// 每行盈亏数字：价格到达这一行通知价时，持仓的实际盈亏（与 MT5 显示同号）。
+    /// buy：(通知价格 − 平均价) × 合计手数 × 100；
+    /// sell：方向相反，结果乘 −1（即 (平均价 − 通知价) × 合计手数 × 100）。
+    /// 日元模式再除以美日实时汇率。结果显示两位小数（行内格式化）。
+    /// 注：原公式 (平均价 − 通知价格) 算出的符号正好反了（2026-10-27 23:25 ren
+    /// 用 MT5 截图核对：现价处应为 +465.80、原公式得 −465.80），已按实际盈亏改定。
     /// 平均价 = 所有开单价格的平均价（按手数加权，与最终价计算用的同一个平均价），
     /// 不是实时价格（ren 22:59 纠正）。平均价、合计手数、方向、汇率都来自最近一次
     /// 截图解析/最终价计算（LiquidationViewModel）。任一输入缺失（无持仓数据、
     /// 日元模式无汇率）返回 nil 显示 --；通知价一变，本函数随画面重算自动刷新。
     private func pnl(for item: AlertItem) -> Double? {
         guard let alertPrice = item.priceValue, alertPrice > 0, liquidation.averageEntry > 0 else { return nil }
-        var value = (liquidation.averageEntry - alertPrice) * liquidation.totalLots * 100
+        var value = (alertPrice - liquidation.averageEntry) * liquidation.totalLots * 100
         if liquidation.mode == .jpy {
             guard liquidation.usdJpyRate > 0 else { return nil }
             value /= liquidation.usdJpyRate
