@@ -243,7 +243,7 @@ struct MainView: View {
             } else {
                 // 列表不做任何自动滚动：数据变化、推送完成、价格更新都不移动位置，
                 // 停在哪里完全由用户自己滑动决定（ren 21:48 明确取消自动定位到当前价）。
-                ScrollView(.vertical, showsIndicators: true) {
+                ScrollView(.vertical, showsIndicators: false) // 滚动时不显示右侧滚动条（ren 2026-10-28） {
                     LazyVStack(alignment: .leading, spacing: effectiveRowSpacing) {
                         ForEach(Array(model.alerts.enumerated()), id: \.element.rowKey) { index, item in
                             AlertRowView(
