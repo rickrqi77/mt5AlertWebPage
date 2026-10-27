@@ -14,7 +14,7 @@ struct AuthView: View {
 
             Text("提醒事项")
                 .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(Color.appGold)
+                .foregroundStyle(Color.appAccentText)
 
             Text("新设备输入一次 Token，本机以后不用再输入")
                 .font(.subheadline)

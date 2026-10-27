@@ -105,10 +105,10 @@ struct MainView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "bell.badge.fill")
                         .font(.system(size: 20))
-                        .foregroundStyle(Color(red: 0.9, green: 0.25, blue: 0.22))
+                        .foregroundStyle(Color.appAccentText)
                     Text("提醒事项")
                         .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(Color.appGold)
+                        .foregroundStyle(Color.appAccentText)
                 }
             }
             .buttonStyle(.plain)
@@ -153,7 +153,7 @@ struct MainView: View {
                             .background(
                                 Capsule().fill(
                                     model.alertsPaused
-                                    ? Color(red: 0.18, green: 0.55, blue: 0.34)
+                                    ? Color.appButton
                                     : Color.primary.opacity(0.12)
                                 )
                             )
@@ -169,7 +169,7 @@ struct MainView: View {
             // 还能手工修改，保存后按新值重算（ren 2026-10-28 要求）。
             Text(formatFinalPrice(liquidation.displayedLiquidationPrice))
                 .font(.system(size: 24, weight: .bold).monospacedDigit())
-                .foregroundStyle(Color.appGold)
+                .foregroundStyle(Color.appAccentText)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .contentShape(Rectangle())
                 .onTapGesture { showLiquidationDetail = true }
@@ -207,8 +207,8 @@ struct MainView: View {
                 Text("保存")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 40)
-                    .background(Color.appGold)
-                    .foregroundStyle(.black)
+                    .background(Color.appButton)
+                    .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .disabled(model.busy)

@@ -118,7 +118,7 @@ struct AlertRowView: View {
             return Color.primary.opacity(0.18)
         }
         if item.enabled {
-            return Color(red: 0.18, green: 0.55, blue: 0.34)
+            return Color.appButton
         }
         return Color.primary.opacity(0.12)
     }

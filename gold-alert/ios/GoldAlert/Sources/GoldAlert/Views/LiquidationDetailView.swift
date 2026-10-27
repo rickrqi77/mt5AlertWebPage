@@ -23,7 +23,7 @@ struct LiquidationDetailView: View {
                 Section("计算项目（可修改）") {
                     editRow("结余", $balanceText)
                     editRow("预付款", $marginText)
-                    editRow("平均价（所有开单加权平均）", $averageText)
+                    editRow("平均价", $averageText)
                     editRow("合计手数", $lotsText)
                     HStack {
                         Text("方向")
@@ -36,7 +36,7 @@ struct LiquidationDetailView: View {
                         .frame(width: 190)
                     }
                     if liquidation.mode == .jpy {
-                        editRow("美日汇率 USDJPY", $rateText)
+                        editRow("美日汇率", $rateText)
                     }
                 }
 
@@ -65,7 +65,7 @@ struct LiquidationDetailView: View {
                     Section {
                         Text(fmt(preview.liquidationPrice))
                             .font(.system(size: 30, weight: .bold).monospacedDigit())
-                            .foregroundStyle(Color.appGold)
+                            .foregroundStyle(Color.appAccentText)
                             .frame(maxWidth: .infinity, alignment: .center)
                     } header: {
                         Text("最终价（\(liquidation.mode.rawValue)）")
