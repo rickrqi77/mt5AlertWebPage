@@ -6,8 +6,6 @@ struct MainView: View {
     @StateObject private var liquidation = LiquidationViewModel()
     @State private var confirmClear = false
     @State private var confirmSaveEmpty = false
-    /// 已自动定位过的提醒列表签名（价格序列）；同一列表只自动滚一次，避免轮询/现价跳动反复抢滚动。
-    @State private var scrolledSignature = ""
     /// 实测相邻两行的行距（行高+间隔），用于精确算出「正好 11 行」的列表高度。
     @State private var alertRowPitch: CGFloat = 44
 
@@ -212,43 +210,40 @@ struct MainView: View {
                     .padding(.vertical, 16)
                     .frame(maxWidth: .infinity)
             } else {
-                ScrollViewReader { rowProxy in
-                    ScrollView(.vertical, showsIndicators: true) {
-                        LazyVStack(alignment: .leading, spacing: Self.alertRowSpacing) {
-                            ForEach(Array(model.alerts.enumerated()), id: \.element.rowKey) { index, item in
-                                AlertRowView(
-                                    index: index,
-                                    item: item,
-                                    onPriceChange: { model.updatePrice(at: index, text: $0) },
-                                    onToggleArm: { model.toggleArm(at: index) },
-                                    onDelete: { model.deleteAlert(at: index) }
-                                )
-                                // 行身份只能用 rowKey，绝不能用 .id(index) 按位置认行：
-                                // 按位置认行时视图被复用到新设定同行号上，是新旧混合的来源。
-                                .id(item.rowKey)
-                                .background(
-                                    GeometryReader { geo in
-                                        Color.clear.preference(
-                                            key: RowOriginsKey.self,
-                                            value: [index: geo.frame(in: .named("alertRows")).minY]
-                                        )
-                                    }
-                                )
-                            }
+                // 列表不做任何自动滚动：数据变化、推送完成、价格更新都不移动位置，
+                // 停在哪里完全由用户自己滑动决定（ren 21:48 明确取消自动定位到当前价）。
+                ScrollView(.vertical, showsIndicators: true) {
+                    LazyVStack(alignment: .leading, spacing: Self.alertRowSpacing) {
+                        ForEach(Array(model.alerts.enumerated()), id: \.element.rowKey) { index, item in
+                            AlertRowView(
+                                index: index,
+                                item: item,
+                                onPriceChange: { model.updatePrice(at: index, text: $0) },
+                                onToggleArm: { model.toggleArm(at: index) },
+                                onDelete: { model.deleteAlert(at: index) }
+                            )
+                            // 行身份只能用 rowKey，绝不能用 .id(index) 按位置认行：
+                            // 按位置认行时视图被复用到新设定同行号上，是新旧混合的来源。
+                            .id(item.rowKey)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: RowOriginsKey.self,
+                                        value: [index: geo.frame(in: .named("alertRows")).minY]
+                                    )
+                                }
+                            )
                         }
                     }
-                    .coordinateSpace(name: "alertRows")
-                    // 高度正好容纳 11 行整行：默认完整显示 11 个，超出的在列表内滑动，
-                    // 不会出现最后一行只露一半。
-                    .frame(height: visibleRowsHeight)
-                    .onPreferenceChange(RowOriginsKey.self) { origins in
-                        if let y0 = origins[0], let y1 = origins[1], y1 > y0 {
-                            alertRowPitch = y1 - y0
-                        }
+                }
+                .coordinateSpace(name: "alertRows")
+                // 高度正好容纳 11 行整行：默认完整显示 11 个，超出的在列表内滑动，
+                // 不会出现最后一行只露一半。
+                .frame(height: visibleRowsHeight)
+                .onPreferenceChange(RowOriginsKey.self) { origins in
+                    if let y0 = origins[0], let y1 = origins[1], y1 > y0 {
+                        alertRowPitch = y1 - y0
                     }
-                    .onAppear { scrollToNearestAlert(proxy: rowProxy) }
-                    .onChange(of: model.alerts) { _, _ in scrollToNearestAlert(proxy: rowProxy) }
-                    .onChange(of: model.displayPrice) { _, _ in scrollToNearestAlert(proxy: rowProxy) }
                 }
             }
         }
@@ -257,22 +252,6 @@ struct MainView: View {
         // 不会缩成一小块浮在画面中间。
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
-    }
-
-    /// 通知设定刷新后，把列表停在离当前价最近的那一行附近。
-    /// 只对「新的一份价格列表」定位一次：本地编辑中（alertsDirty）不抢滚动，
-    /// 云端轮询带回相同价格、现价小幅跳动也不反复滚动。
-    private func scrollToNearestAlert(proxy: ScrollViewProxy) {
-        guard !model.alertsDirty, model.displayPrice > 0, !model.alerts.isEmpty else { return }
-        let signature = model.alerts.map(\.priceText).joined(separator: "|")
-        guard signature != scrolledSignature else { return }
-        guard let target = nearestAlertIndex else { return }
-        scrolledSignature = signature
-        // 行的滚动身份是 rowKey（与 .id 一致），不是行号。
-        let targetID = model.alerts[target].rowKey
-        DispatchQueue.main.async {
-            proxy.scrollTo(targetID, anchor: .center)
-        }
     }
 
     /// 列表可视高度：最多 11 行整行（n 行 = n × 行距 − 1 个间隔，行距由前两行原点实测）。
@@ -292,16 +271,6 @@ struct MainView: View {
         static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
             value.merge(nextValue()) { _, new in new }
         }
-    }
-
-    private var nearestAlertIndex: Int? {
-        let price = model.displayPrice
-        guard price > 0 else { return nil }
-        return model.alerts.enumerated()
-            .min(by: {
-                abs(($0.element.priceValue ?? .greatestFiniteMagnitude) - price)
-                    < abs(($1.element.priceValue ?? .greatestFiniteMagnitude) - price)
-            })?.offset
     }
 
     private func format(_ value: Double) -> String {
