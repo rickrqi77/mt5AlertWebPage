@@ -3,8 +3,9 @@ import SwiftUI
 struct AlertRowView: View {
     let index: Int
     let item: AlertItem
-    /// 这一行「到达通知价时的盈亏」整数（按当前模式公式算好后传入）；算不出时为 nil，显示 --。
-    let pnl: Int?
+    /// 这一行「到达通知价时的盈亏」（按当前模式公式算好后传入，显示两位小数）；
+    /// 算不出时为 nil，显示 --。
+    let pnl: Double?
     let onPriceChange: (String) -> Void
     let onToggleArm: () -> Void
     let onDelete: () -> Void
@@ -42,21 +43,35 @@ struct AlertRowView: View {
                 .opacity(dragOffset == 0 ? 0 : 1)
 
             HStack(spacing: 6) {
-                // 没有行号：价格就在最左边，框缩到正好放下数字。
+                // 序号加回来（盈亏框缩窄后有空间了）：只显示数字，不带句号。
+                Text("\(index + 1)")
+                    .font(.body.monospacedDigit())
+                    .foregroundStyle(Color.white.opacity(0.45))
+                    .frame(width: 22, alignment: .leading)
+                    .lineLimit(1)
+
+                // 价格框：缩到正好放下数字。
                 SelectAllPriceField(text: priceBinding)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .frame(minWidth: 112, maxWidth: 112, minHeight: 36, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
 
-                // 盈亏数字：价格与触发按钮之间。通知价/实时价/手数/汇率任一变化，
-                // 画面重算后这里立刻跟着变（值由 MainView 按模式公式算好传入）。
+                // 盈亏数字：价格与触发按钮之间，显示两位小数；框缩窄到正好
+                // 放下「4 位整数 + 两位小数」（如 4452.00，含负号也放得下）。
+                // 通知价/平均价/手数/汇率任一变化，画面重算后立刻跟着变
+                //（值由 MainView 按模式公式算好传入）。
                 Text(pnlText)
                     .font(.body.monospacedDigit().weight(.semibold))
                     .foregroundStyle(pnlColor)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    .minimumScaleFactor(0.75)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .frame(minWidth: 94, maxWidth: 94, minHeight: 36, alignment: .center)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
+
+                Spacer(minLength: 0)
 
                 // 触发按钮固定在这一行最右边、右对齐。
                 Button(armTitle) { onToggleArm() }
@@ -98,7 +113,7 @@ struct AlertRowView: View {
 
     private var pnlText: String {
         guard let pnl else { return "--" }
-        return String(pnl)
+        return String(format: "%.2f", pnl)
     }
 
     private var pnlColor: Color {
