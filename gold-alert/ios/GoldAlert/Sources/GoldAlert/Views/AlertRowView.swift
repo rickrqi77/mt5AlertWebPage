@@ -28,6 +28,9 @@ struct AlertRowView: View {
             .frame(maxWidth: 160, minHeight: 36, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
             .onAppear { draft = item.priceText }
+            // 行视图被复用时 onAppear 不再触发，用 task(id:) 保证价格一变草稿必同步，
+            // 避免显示残留上一份设定的价格。
+            .task(id: item.priceText) { draft = item.priceText }
             .onChange(of: item.priceText) { _, newValue in
                 if draft != newValue { draft = newValue }
             }

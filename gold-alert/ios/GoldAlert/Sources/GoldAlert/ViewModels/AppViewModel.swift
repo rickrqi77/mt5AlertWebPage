@@ -147,8 +147,10 @@ final class AppViewModel: ObservableObject {
                 let existing = alerts
                 let mapped = remoteDTOs.map { dto -> AlertItem in
                     var item = dto.asItem()
-                    // 复用稳定身份（按服务器 id，其次价格），避免刷新时重建行、滚动位置跳回顶部。
-                    let byId = existing.first(where: { $0.id != nil && $0.id == item.id })
+                    // 复用稳定身份（id 与价格都对上才算同一行，其次按价格），
+                    // 避免刷新时重建行、滚动位置跳回顶部；价格不同绝不继承身份，
+                    // 否则行视图会把旧价格的草稿状态带进新设定。
+                    let byId = existing.first(where: { $0.id != nil && $0.id == item.id && $0.priceText == item.priceText })
                     let byPrice = existing.first(where: { $0.priceText == item.priceText })
                     if let match = byId ?? byPrice {
                         item.localID = match.localID
@@ -170,8 +172,10 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// 间隔下拉改动后立刻生效：不再用服务器的生成接口（它在已有设定时只会把新旧
-    /// 网格混在一起改一部分），改由本地按间隔逻辑直接算出完整网格，一次保存覆盖服务器。
+    /// 间隔下拉改动后立刻生效：本地按间隔逻辑直接算出完整网格，一次保存覆盖服务器。
+    /// （2026-10-27 实测服务器：POST /api/alerts 与 /api/alerts/auto 都是整表替换、
+    /// 不合并，EA 同步也不会把旧设定带回来；截图里的新旧混合出在 app 行视图复用，
+    /// 已由 AlertItem.rowKey 与行内草稿同步修复。）
     ///
     /// 间隔逻辑（ren 定版）：以当前 EA 价格取整为中心点，从中心向前、向后各按间隔
     /// 空出点数设定，前后各 7 个、加上中心共 15 个；除中心点外其余全部设为有效（触发），

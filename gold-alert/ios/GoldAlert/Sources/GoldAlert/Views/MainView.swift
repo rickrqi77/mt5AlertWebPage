@@ -215,7 +215,7 @@ struct MainView: View {
                 ScrollViewReader { rowProxy in
                     ScrollView(.vertical, showsIndicators: true) {
                         LazyVStack(alignment: .leading, spacing: Self.alertRowSpacing) {
-                            ForEach(Array(model.alerts.enumerated()), id: \.element.localID) { index, item in
+                            ForEach(Array(model.alerts.enumerated()), id: \.element.rowKey) { index, item in
                                 AlertRowView(
                                     index: index,
                                     item: item,

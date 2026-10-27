@@ -23,6 +23,11 @@ struct AlertItem: Identifiable, Equatable, Hashable, Sendable, Codable {
     var priceValue: Double? {
         Double(priceText.trimmingCharacters(in: .whitespacesAndNewlines))
     }
+
+    /// 列表行身份：价格或状态一变就视为新行。只用 localID 时，整表替换后
+    /// LazyVStack 可能复用旧行视图，行内 @State 草稿（显示的价格文本）残留
+    /// 上一份设定的值，画面会拼出新旧混合的列表（实测截图里的「中间段不对」）。
+    var rowKey: String { "\(localID.uuidString)|\(priceText)|\(enabled)|\(triggered)" }
 }
 
 struct StatusPayload: Decodable, Sendable {
