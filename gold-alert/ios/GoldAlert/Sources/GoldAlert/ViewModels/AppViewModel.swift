@@ -33,14 +33,8 @@ final class AppViewModel: ObservableObject {
     private var toastTask: Task<Void, Never>?
     private var doneFlashTask: Task<Void, Never>?
 
-    /// 启动时刻；启动缓冲内不弹瞬时网络错误（后台仍在自动重试）。
-    private var bootTime: Date?
-
     /// 云端状态（EA 在线小圆点、已触发）轮询间隔。
     private static let cloudPollSeconds: Double = 3
-
-    /// 启动缓冲时长：期间抑制“还在取得信息”的网络错误提示。
-    private static let bootGraceSeconds: TimeInterval = 8
 
     var armedCount: Int { alerts.filter(\.enabled).count }
 
@@ -136,7 +130,6 @@ final class AppViewModel: ObservableObject {
 
     func startLoops() {
         stopLoops()
-        bootTime = Date()
         Task { await refreshCloudState() }
         let nanos = UInt64(max(pollSeconds, 0.5) * 1_000_000_000)
         priceTask = Task { [weak self] in
@@ -162,12 +155,6 @@ final class AppViewModel: ObservableObject {
         cloudTask = nil
     }
 
-    /// 启动缓冲内（还在取得信息）抑制瞬时网络错误提示。
-    private var isBootGrace: Bool {
-        guard let bootTime else { return false }
-        return Date().timeIntervalSince(bootTime) < Self.bootGraceSeconds
-    }
-
     private func persistState() {
         LocalCache.saveAlerts(alerts)
         LocalCache.saveStep(step)
@@ -183,10 +170,7 @@ final class AppViewModel: ObservableObject {
             quote = q
             lastRefreshText = "现货 " + Self.clockString()
         } catch {
-            // 启动缓冲内仍在取得信息，瞬时网络错误不提示；持续失败才提示。
-            if quote.price <= 0, !isBootGrace {
-                showToast(error.localizedDescription, error: true)
-            }
+            // 切入画面/后台刷新失败不弹红色错误提示；循环会继续自动重试。
         }
     }
 
@@ -218,11 +202,17 @@ final class AppViewModel: ObservableObject {
             logout()
             authError = "Token 无效"
         } catch {
-            // 启动缓冲内仍在取得信息，瞬时网络错误不提示；持续失败才提示。
-            if !isBootGrace {
-                showToast(error.localizedDescription, error: true)
-            }
+            // 切入画面/后台刷新失败不弹红色错误提示；3 秒后会自动再刷。
         }
+    }
+
+    /// 间隔下拉改动后立刻生效：更新间隔，并按当前价重新生成提醒网格（原「设定」按钮的动作）。
+    /// 尚无现货价时只先记住间隔，等有价格后用户再改动即会生成，不弹错误提示。
+    func applyStep(_ value: Double) async {
+        step = value
+        persistState()
+        guard quote.isValid else { return }
+        await autoGenerate()
     }
 
     func autoGenerate() async {

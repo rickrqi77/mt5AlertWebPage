@@ -24,8 +24,8 @@ struct AlertRowView: View {
 
             SelectAllPriceField(text: $draft)
             .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .frame(maxWidth: 160, minHeight: 40, alignment: .leading)
+            .padding(.vertical, 7)
+            .frame(maxWidth: 160, minHeight: 36, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.08)))
             .onAppear { draft = item.priceText }
             .onChange(of: item.priceText) { _, newValue in
@@ -38,14 +38,14 @@ struct AlertRowView: View {
             Button(armTitle) { onToggleArm() }
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 10)
-                .padding(.vertical, 10)
+                .padding(.vertical, 7)
                 .background(RoundedRectangle(cornerRadius: 8).fill(armColor))
                 .foregroundStyle(.white)
 
             Button("删除") { onDelete() }
                 .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 10)
-                .padding(.vertical, 10)
+                .padding(.vertical, 7)
                 .foregroundStyle(Color(red: 0.9, green: 0.4, blue: 0.35))
                 .background(
                     RoundedRectangle(cornerRadius: 8)

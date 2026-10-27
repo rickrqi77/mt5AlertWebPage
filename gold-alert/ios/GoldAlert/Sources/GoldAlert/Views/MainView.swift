@@ -2,42 +2,34 @@ import SwiftUI
 
 struct MainView: View {
     @EnvironmentObject private var model: AppViewModel
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var liquidation = LiquidationViewModel()
     @State private var confirmClear = false
     @State private var confirmSaveEmpty = false
     @State private var showPollPicker = false
-    @State private var alertRowPitch: CGFloat = 52
+    /// 已自动定位过的提醒列表签名（价格序列）；同一列表只自动滚一次，避免轮询/现价跳动反复抢滚动。
+    @State private var scrolledSignature = ""
 
     var body: some View {
-        ScrollViewReader { proxy in
-            GeometryReader { geo in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        // 第 1 屏：顶部 + 提醒价格（恰好 9 行）。底部用弹性留白填满整屏，
-                        // 让“最终价”区域完全落在第 2 屏，首屏不露出。
-                        VStack(alignment: .leading, spacing: 8) {
-                            header
-                            priceHero
-                            stepAndAutoRow
-                            saveAndClearRow
-                            alertsPanel
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .top)
-
-                        // 第 2 屏：最终价（紧贴提醒面板下方）
-                        LiquidationView {
-                            withAnimation(.easeInOut(duration: 0.35)) {
-                                proxy.scrollTo("liquidationBottom", anchor: .bottom)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 4)
-                        .padding(.bottom, 20)
-                        .id("liquidationBottom")
-                    }
-                }
+        // 无外层滚动条：整屏紧凑排版一屏装下，提醒行多时只在面板内部滚动。
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            priceHero
+            toolbarRow
+            alertsPanel
+                .frame(maxHeight: .infinity)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // 每次打开画面：自动找截图里最后一张图算最终价（找不到/图不对静默，不提示）。
+        .task {
+            await liquidation.autoCalculateFromLatestScreenshot()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                Task { await liquidation.autoCalculateFromLatestScreenshot() }
             }
         }
         .confirmationDialog("确定清除全部提醒？", isPresented: $confirmClear, titleVisibility: .visible) {
@@ -72,12 +64,12 @@ struct MainView: View {
 
     private var header: some View {
         HStack {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: "bell.badge.fill")
-                    .font(.system(size: 22))
+                    .font(.system(size: 20))
                     .foregroundStyle(Color(red: 0.9, green: 0.25, blue: 0.22))
                 Text("提醒事项")
-                    .font(.system(size: 21, weight: .bold))
+                    .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
             }
 
@@ -89,7 +81,7 @@ struct MainView: View {
     }
 
     private var priceHero: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 3) {
             HStack(spacing: 6) {
                 Text(model.quote.symbol.isEmpty ? "XAUUSD" : model.quote.symbol)
                     .font(.caption)
@@ -136,47 +128,41 @@ struct MainView: View {
                     .disabled(model.busy)
                 }
             }
+
+            // 最终价：比实时价小一号，显示在实时价正下方。
+            // 从未计算成功过显示 0；成功过则默认显示上次结果，读到新图算成功才刷新。
+            HStack(spacing: 6) {
+                Text("最终价")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(Color.white.opacity(0.55))
+                Text(formatFinalPrice(liquidation.displayedLiquidationPrice))
+                    .font(.system(size: 24, weight: .bold).monospacedDigit())
+                    .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
+        .padding(.vertical, 2)
     }
 
-    /// Interval menu + 设定 — equal width, full row (no chevron on the menu).
-    private var stepAndAutoRow: some View {
-        HStack(spacing: 8) {
+    /// 间隔下拉 + 保存 + 清除：一行三等分（已取消「设定」按钮，间隔改动即立刻重新设定）。
+    private var toolbarRow: some View {
+        HStack(spacing: 6) {
             Menu {
                 ForEach(AppViewModel.stepChoices, id: \.self) { value in
                     Button(String(Int(value))) {
-                        model.step = value
+                        Task { await model.applyStep(value) }
                     }
                 }
             } label: {
                 Text(String(Int(model.step)))
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 38)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 32)
                     .background(Color.white.opacity(0.1))
                     .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
 
-            Button {
-                Task { await model.autoGenerate() }
-            } label: {
-                Text("设定")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 38)
-                    .background(Color(red: 0.23, green: 0.48, blue: 0.84))
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
-            }
-            .disabled(model.busy)
-        }
-    }
-
-    /// 保存 then 清除 — equal width, full row.
-    private var saveAndClearRow: some View {
-        HStack(spacing: 8) {
             Button {
                 if !model.alerts.isEmpty && model.armedCount == 0 {
                     confirmSaveEmpty = true
@@ -185,11 +171,11 @@ struct MainView: View {
                 }
             } label: {
                 Text("保存")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 38)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 32)
                     .background(Color(red: 0.83, green: 0.63, blue: 0.09))
                     .foregroundStyle(.black)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .disabled(model.busy)
 
@@ -197,17 +183,18 @@ struct MainView: View {
                 confirmClear = true
             } label: {
                 Text("清除")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, minHeight: 38)
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 32)
                     .background(Color(red: 0.75, green: 0.22, blue: 0.17))
                     .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
+            .disabled(model.busy)
         }
     }
 
     private var alertsPanel: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("提醒价格")
                     .font(.headline)
@@ -231,57 +218,54 @@ struct MainView: View {
                     .padding(.vertical, 16)
                     .frame(maxWidth: .infinity)
             } else {
-                ScrollView(.vertical, showsIndicators: true) {
-                    LazyVStack(alignment: .leading, spacing: Self.alertRowSpacing) {
-                        ForEach(Array(model.alerts.enumerated()), id: \.element.localID) { index, item in
-                            AlertRowView(
-                                index: index,
-                                item: item,
-                                onPriceChange: { model.updatePrice(at: index, text: $0) },
-                                onToggleArm: { model.toggleArm(at: index) },
-                                onDelete: { model.deleteAlert(at: index) }
-                            )
-                            .background(
-                                GeometryReader { geo in
-                                    Color.clear.preference(
-                                        key: RowOriginsKey.self,
-                                        value: [index: geo.frame(in: .named("alertRows")).minY]
-                                    )
-                                }
-                            )
+                ScrollViewReader { rowProxy in
+                    ScrollView(.vertical, showsIndicators: true) {
+                        LazyVStack(alignment: .leading, spacing: 8) {
+                            ForEach(Array(model.alerts.enumerated()), id: \.element.localID) { index, item in
+                                AlertRowView(
+                                    index: index,
+                                    item: item,
+                                    onPriceChange: { model.updatePrice(at: index, text: $0) },
+                                    onToggleArm: { model.toggleArm(at: index) },
+                                    onDelete: { model.deleteAlert(at: index) }
+                                )
+                                .id(index)
+                            }
                         }
                     }
-                }
-                .coordinateSpace(name: "alertRows")
-                .frame(height: visibleRowsHeight)
-                .onPreferenceChange(RowOriginsKey.self) { origins in
-                    if let y0 = origins[0], let y1 = origins[1], y1 > y0 {
-                        alertRowPitch = y1 - y0
-                    }
+                    .onAppear { scrollToNearestAlert(proxy: rowProxy) }
+                    .onChange(of: model.alerts) { _, _ in scrollToNearestAlert(proxy: rowProxy) }
+                    .onChange(of: model.quote.price) { _, _ in scrollToNearestAlert(proxy: rowProxy) }
                 }
             }
         }
-        .padding(14)
+        .padding(10)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.white.opacity(0.04)))
     }
 
-    /// Height of the alert rows region, capped so exactly 9 rows show; extras scroll inside.
-    /// n 行内容高度 = n × 行间距(pitch) − 1 个间距（由前两行原点实测，精确到像素）。
-    private var visibleRowsHeight: CGFloat {
-        let n = min(model.alerts.count, 9)
-        guard n > 0 else { return 0 }
-        return CGFloat(n) * alertRowPitch - Self.alertRowSpacing
-    }
-
-    /// 收集每行在滚动区坐标系中的顶部 Y，用于实测相邻两行的行间距。
-    private struct RowOriginsKey: PreferenceKey {
-        static let defaultValue: [Int: CGFloat] = [:]
-        static func reduce(value: inout [Int: CGFloat], nextValue: () -> [Int: CGFloat]) {
-            value.merge(nextValue()) { _, new in new }
+    /// 通知设定刷新后，把列表停在离当前价最近的那一行附近。
+    /// 只对「新的一份价格列表」定位一次：本地编辑中（alertsDirty）不抢滚动，
+    /// 云端轮询带回相同价格、现价小幅跳动也不反复滚动。
+    private func scrollToNearestAlert(proxy: ScrollViewProxy) {
+        guard !model.alertsDirty, model.quote.price > 0, !model.alerts.isEmpty else { return }
+        let signature = model.alerts.map(\.priceText).joined(separator: "|")
+        guard signature != scrolledSignature else { return }
+        guard let target = nearestAlertIndex else { return }
+        scrolledSignature = signature
+        DispatchQueue.main.async {
+            proxy.scrollTo(target, anchor: .center)
         }
     }
 
-    private static let alertRowSpacing: CGFloat = 10
+    private var nearestAlertIndex: Int? {
+        let price = model.quote.price
+        guard price > 0 else { return nil }
+        return model.alerts.enumerated()
+            .min(by: {
+                abs(($0.element.priceValue ?? .greatestFiniteMagnitude) - price)
+                    < abs(($1.element.priceValue ?? .greatestFiniteMagnitude) - price)
+            })?.offset
+    }
 
     private func format(_ value: Double) -> String {
         guard value > 0 else { return "--" }
@@ -289,6 +273,11 @@ struct MainView: View {
             return String(format: "%.2f", value)
         }
         return String(format: "%.3f", value)
+    }
+
+    private func formatFinalPrice(_ value: Double) -> String {
+        guard value > 0 else { return "0" }
+        return String(format: "%.2f", value)
     }
 
     private static func pollLabel(_ seconds: Double) -> String {
