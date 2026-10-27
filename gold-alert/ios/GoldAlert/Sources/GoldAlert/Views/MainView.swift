@@ -78,9 +78,8 @@ struct MainView: View {
             .accessibilityHint("点按切换最终价计算模式（日元/美元）")
 
             Spacer()
-            Button("退出") { model.logout() }
-                .font(.subheadline)
-                .foregroundStyle(Color.white.opacity(0.65))
+            // 右上角不放「退出」按钮（ren 21:54 要求去掉）；退出登录逻辑本身保留，
+            // Token 失效时仍会自动回到解锁画面。
         }
     }
 
