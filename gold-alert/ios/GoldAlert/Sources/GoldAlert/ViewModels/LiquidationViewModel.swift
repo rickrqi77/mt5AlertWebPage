@@ -53,6 +53,53 @@ final class LiquidationViewModel: ObservableObject {
         }
     }
 
+    /// 最终价明细页展示/编辑的当前计算输入：优先最近一次计算结果，
+    /// 其次上次存下的截图解析数据；都没有时用已发布的平均价/手数兜底。
+    var currentInputs: (balance: Double, margin: Double, averageEntry: Double, totalLots: Double, side: PositionSide?) {
+        if let r = result {
+            return (r.balance, r.margin, r.averagePrice, r.totalLots, r.side)
+        }
+        if let data = Self.loadTradeData() {
+            return (data.balance, data.margin, data.averageEntry, data.totalLots, data.side)
+        }
+        return (0, 0, averageEntry, totalLots, positionSide)
+    }
+
+    /// 明细页手工修改后保存：用改后的值重算最终价，并把这份数据存为当前持仓
+    /// 数据（每行盈亏用的平均价/合计手数/方向也随之更新——手工修正解析错误
+    /// 时两处一起对齐）。日元模式优先用用户改的汇率，没给才去取实时汇率。
+    /// 计算失败静默、保留旧显示（与自动计算失败时的行为一致）。
+    func applyManualInputs(balance: Double, margin: Double, averageEntry: Double, totalLots: Double, side: PositionSide, usdJpyRate editedRate: Double?) async {
+        let data = ScreenshotTradeData(
+            balance: balance,
+            margin: margin,
+            positions: [GoldPosition(symbol: "GOLD", side: side, lots: totalLots, entryPrice: averageEntry)]
+        )
+        Self.saveTradeData(data)
+        self.totalLots = data.totalLots
+        self.positionSide = data.side
+        self.averageEntry = data.averageEntry
+
+        do {
+            let calculated: LiquidationResult
+            switch mode {
+            case .usd:
+                calculated = try LiquidationCalculator.calculateUSD(data: data)
+            case .jpy:
+                let rate: Double
+                if let editedRate, editedRate > 0 {
+                    rate = editedRate
+                } else {
+                    rate = try await SwissquoteClient.shared.fetchUSDJPY()
+                }
+                calculated = try LiquidationCalculator.calculateJPY(data: data, usdJpyRate: rate)
+            }
+            applyResult(calculated)
+        } catch {
+            // 静默保留旧结果。
+        }
+    }
+
     /// 画面实时价下方显示的最终价：本次算出新的用新的，否则显示上次结果（无则 0）。
     /// 注意取的是计算结果的最后一步 liquidationPrice（最终价），不是平均价 averagePrice。
     var displayedLiquidationPrice: Double {

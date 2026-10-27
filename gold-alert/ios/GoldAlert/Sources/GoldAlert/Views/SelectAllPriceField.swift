@@ -16,7 +16,7 @@ struct SelectAllPriceField: UIViewRepresentable {
         field.autocorrectionType = .no
         field.autocapitalizationType = .none
         field.borderStyle = .none
-        field.textColor = .white
+        field.textColor = .label
         field.font = .monospacedDigitSystemFont(ofSize: 20, weight: .regular)
         field.tintColor = UIColor(red: 0.83, green: 0.63, blue: 0.09, alpha: 1)
         field.delegate = context.coordinator

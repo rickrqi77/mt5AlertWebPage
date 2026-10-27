@@ -5,7 +5,8 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.04, green: 0.04, blue: 0.04).ignoresSafeArea()
+            // 系统背景色：深色模式为黑、浅色模式为白，随系统外观自动切换。
+            Color(uiColor: .systemBackground).ignoresSafeArea()
 
             if model.isUnlocked {
                 MainView()

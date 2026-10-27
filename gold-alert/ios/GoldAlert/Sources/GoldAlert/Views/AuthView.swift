@@ -14,11 +14,11 @@ struct AuthView: View {
 
             Text("提醒事项")
                 .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+                .foregroundStyle(Color.appGold)
 
             Text("新设备输入一次 Token，本机以后不用再输入")
                 .font(.subheadline)
-                .foregroundStyle(Color.white.opacity(0.55))
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
 
@@ -27,7 +27,7 @@ struct AuthView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .padding(14)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08)))
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.08)))
                     .focused($tokenFocused)
 
                 TextField("Cloudflare 地址", text: $model.baseURLInput)
@@ -35,7 +35,7 @@ struct AuthView: View {
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
                     .padding(14)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.08)))
+                    .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.08)))
 
                 Button {
                     Task { await model.unlock() }
@@ -44,7 +44,7 @@ struct AuthView: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(Color(red: 0.83, green: 0.63, blue: 0.09))
+                        .background(Color.appGold)
                         .foregroundStyle(.black)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }

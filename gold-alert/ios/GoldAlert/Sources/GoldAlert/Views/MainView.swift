@@ -6,6 +6,8 @@ struct MainView: View {
     @StateObject private var liquidation = LiquidationViewModel()
     @State private var confirmClear = false
     @State private var confirmSaveEmpty = false
+    /// 点最终价弹出的明细页（公式各项可看可改）。
+    @State private var showLiquidationDetail = false
     /// 实测的单行内容高度（不含行间隔），由前两行原点之差减去当前间隔得到。
     @State private var alertRowHeight: CGFloat = 38
     /// 提醒面板的实际高度（背景 GeometryReader 实测）：用来把行间隔按可用空间
@@ -45,6 +47,9 @@ struct MainView: View {
             if newMode == .jpy {
                 Task { await liquidation.refreshUSDJPYRate() }
             }
+        }
+        .sheet(isPresented: $showLiquidationDetail) {
+            LiquidationDetailView(liquidation: liquidation)
         }
         .confirmationDialog("确定清除全部提醒？", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("清除", role: .destructive) {
@@ -103,7 +108,7 @@ struct MainView: View {
                         .foregroundStyle(Color(red: 0.9, green: 0.25, blue: 0.22))
                     Text("提醒事项")
                         .font(.system(size: 20, weight: .bold))
-                        .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+                        .foregroundStyle(Color.appGold)
                 }
             }
             .buttonStyle(.plain)
@@ -125,7 +130,7 @@ struct MainView: View {
                 // 右边缘再往右一点的位置。
                 Text(format(model.displayPrice))
                     .font(.system(size: 32, weight: .bold).monospacedDigit())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(.primary)
                     .overlay(alignment: .trailing) {
                         Circle()
                             .fill(model.eaOnline
@@ -149,10 +154,10 @@ struct MainView: View {
                                 Capsule().fill(
                                     model.alertsPaused
                                     ? Color(red: 0.18, green: 0.55, blue: 0.34)
-                                    : Color.white.opacity(0.12)
+                                    : Color.primary.opacity(0.12)
                                 )
                             )
-                            .foregroundStyle(.white)
+                            .foregroundStyle(model.alertsPaused ? Color.white : Color.primary)
                     }
                     .disabled(model.busy)
                 }
@@ -160,11 +165,14 @@ struct MainView: View {
 
             // 最终价：不带文字标签，只显示价格本身（计算结果最后一步的值），居中，
             // 比实时价小一号。从未计算成功过显示 0；成功过则默认显示上次结果，
-            // 读到新图算成功才刷新。
+            // 读到新图算成功才刷新。点击弹出最终价明细页：公式各项的值都能看，
+            // 还能手工修改，保存后按新值重算（ren 2026-10-28 要求）。
             Text(formatFinalPrice(liquidation.displayedLiquidationPrice))
                 .font(.system(size: 24, weight: .bold).monospacedDigit())
-                .foregroundStyle(Color(red: 0.83, green: 0.63, blue: 0.09))
+                .foregroundStyle(Color.appGold)
                 .frame(maxWidth: .infinity, alignment: .center)
+                .contentShape(Rectangle())
+                .onTapGesture { showLiquidationDetail = true }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)
@@ -183,8 +191,8 @@ struct MainView: View {
                 Text(String(Int(model.step)))
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 40)
-                    .background(Color.white.opacity(0.1))
-                    .foregroundStyle(.white)
+                    .background(Color.primary.opacity(0.1))
+                    .foregroundStyle(.primary)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
@@ -199,7 +207,7 @@ struct MainView: View {
                 Text("保存")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 40)
-                    .background(Color(red: 0.83, green: 0.63, blue: 0.09))
+                    .background(Color.appGold)
                     .foregroundStyle(.black)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }
@@ -227,20 +235,20 @@ struct MainView: View {
                 if model.doneFlash {
                     Text("  完成")
                         .font(.caption)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(.primary)
                 }
                 Spacer()
                 Text("触发 \(model.armedCount) / \(model.alerts.count)")
                     .font(.caption)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.white.opacity(0.08)))
+                    .background(Capsule().fill(Color.primary.opacity(0.08)))
             }
 
             if model.alerts.isEmpty {
                 Text("暂无提醒")
                     .font(.subheadline)
-                    .foregroundStyle(Color.white.opacity(0.4))
+                    .foregroundStyle(.secondary)
                     .padding(.vertical, 16)
                     .frame(maxWidth: .infinity)
             } else {
@@ -291,8 +299,8 @@ struct MainView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             ZStack {
-                // 提醒区域不要底色，就是背景黑（ren 23:10 定版）。
-                Color.black
+                // 提醒区域不要独立底色，与画面背景同色（深色黑/浅色白，随系统外观）。
+                Color(uiColor: .systemBackground)
                 // 实测面板高度，供行间隔按可用空间自动拉开（见 effectiveRowSpacing）。
                 GeometryReader { geo in
                     Color.clear

@@ -29,13 +29,13 @@ struct AlertRowView: View {
             // 序号：只显示数字、不带句号；最多两位，固定尺寸保证显示完整不截断。
             Text("\(index + 1)")
                 .font(.body.monospacedDigit())
-                .foregroundStyle(Color.white.opacity(0.45))
+                .foregroundStyle(.secondary)
                 .frame(width: 26, alignment: .leading)
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .layoutPriority(2)
 
-            // 价格数字：无背景框，直接黑底（整行不要背景色，ren 23:10 定版）。
+            // 价格数字：无背景框，与背景同色（整行不要独立底色，ren 23:10 定版）。
             // 在价格上左右滑动以 0.5 为单位调价（见 priceSwipeGesture）。
             SelectAllPriceField(text: priceBinding)
             .padding(.horizontal, 8)
@@ -64,10 +64,10 @@ struct AlertRowView: View {
                 .padding(.vertical, 7)
                 .frame(minWidth: 74)
                 .background(RoundedRectangle(cornerRadius: 8).fill(armColor))
-                .foregroundStyle(.white)
+                .foregroundStyle(armForeground)
         }
-        // 行底色就是纯黑。
-        .background(Color.black)
+        // 行底色与画面背景同色（深色黑/浅色白，随系统外观）。
+        .background(Color(uiColor: .systemBackground))
     }
 
     /// 在价格上左右滑动调价（ren 2026-10-28 恢复此手势，滑动删除取消）：
@@ -102,10 +102,10 @@ struct AlertRowView: View {
     }
 
     private var pnlColor: Color {
-        guard let pnl else { return Color.white.opacity(0.4) }
+        guard let pnl else { return .secondary }
         if pnl > 0 { return Color(red: 0.3, green: 0.75, blue: 0.45) }
         if pnl < 0 { return Color(red: 0.9, green: 0.4, blue: 0.35) }
-        return Color.white.opacity(0.55)
+        return Color.primary.opacity(0.55)
     }
 
     private var armTitle: String {
@@ -115,11 +115,19 @@ struct AlertRowView: View {
 
     private var armColor: Color {
         if !item.enabled && item.triggered {
-            return Color.white.opacity(0.18)
+            return Color.primary.opacity(0.18)
         }
         if item.enabled {
             return Color(red: 0.18, green: 0.55, blue: 0.34)
         }
-        return Color.white.opacity(0.12)
+        return Color.primary.opacity(0.12)
+    }
+
+    /// 按钮文字色：绿色「触发」底上用白字；灰底（关闭/已用）随外观用主色/次色，
+    /// 保证浅色模式下也看得清。
+    private var armForeground: Color {
+        if item.enabled { return .white }
+        if item.triggered { return .secondary }
+        return .primary
     }
 }
