@@ -31,6 +31,15 @@ enum MT5ScreenshotParser {
             throw AppError.message("截图里没有 GOLD 持仓")
         }
 
+        // 最后一道手数合理性检查：MT5 手数按 0.01 步进，合计手数必须是 0.01 的
+        // 整数倍；OCR 偶发读串（如手数被拼成 0.2675）时整次解析作废，
+        // 自动计算会静默保留上次的好数据，而不是用坏数据覆盖最终价/每行盈亏。
+        let totalLots = positions.reduce(0) { $0 + $1.lots }
+        let scaledTotalLots = totalLots * 100
+        guard abs(scaledTotalLots - scaledTotalLots.rounded()) < 1e-6 else {
+            throw AppError.message("截图里的手数不合理")
+        }
+
         return ScreenshotTradeData(balance: balance, margin: margin, positions: positions)
     }
 
@@ -151,13 +160,31 @@ enum MT5ScreenshotParser {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let ns = text as NSString
         let full = NSRange(location: 0, length: ns.length)
-        guard let match = regex.firstMatch(in: text, options: [], range: full),
-              match.numberOfRanges >= 3 else { return nil }
-        let sideRaw = ns.substring(with: match.range(at: 1)).lowercased()
-        let lots = Double(ns.substring(with: match.range(at: 2))) ?? 0
-        guard lots > 0, lots < 100 else { return nil }
-        let side: PositionSide = sideRaw == "buy" ? .buy : .sell
-        return (side, lots)
+        // 逐个候选检查：手数必须是 0.01 步进（小数至多两位）。OCR 把手数和
+        // 后面的盈亏数字读串时会出现 0.2675 这类四位小数，不能采信，
+        // 跳过这个候选继续找下一个合格的 buy/sell 手数。
+        for match in regex.matches(in: text, options: [], range: full) where match.numberOfRanges >= 3 {
+            let token = ns.substring(with: match.range(at: 2))
+            guard isValidLotsToken(token),
+                  let lots = Double(token), lots > 0, lots < 100 else { continue }
+            let sideRaw = ns.substring(with: match.range(at: 1)).lowercased()
+            let side: PositionSide = sideRaw == "buy" ? .buy : .sell
+            return (side, lots)
+        }
+        return nil
+    }
+
+    /// MT5 手数按 0.01 步进：整数，或小数部分至多两位（如 0.2 / 0.25 / 1.50）。
+    private static func isValidLotsToken(_ token: String) -> Bool {
+        let parts = token.split(separator: ".", omittingEmptySubsequences: false)
+        switch parts.count {
+        case 1:
+            return true
+        case 2:
+            return parts[1].count <= 2
+        default:
+            return false
+        }
     }
 
     /// Left number of `开仓价 → 现价` under GOLD.
@@ -213,7 +240,10 @@ enum MT5ScreenshotParser {
             var l = line
             // Only collapse thousand separators like "136 466" / "1 088.51".
             // Do NOT join separate values such as "0.01 3988.21" or "3988.21 3989.22".
-            while let range = l.range(of: #"(\d) (\d{3}(?:\D|$))"#, options: .regularExpression) {
+            // 空格前的整数必须是独立整数（前面不能是数字或小数点），否则持仓行
+            // 同一行里的「buy 0.2 683.40」（手数 + 盈亏）会被拼成 0.2683.40，
+            // 手数被误读成 0.2683（2026-10-27 实测踩中：0.2 与 675.xx 拼成 0.2675）。
+            while let range = l.range(of: #"(^|[^0-9.])(\d+) (\d{3}(?:\D|$))"#, options: .regularExpression) {
                 let compact = l[range].replacingOccurrences(of: " ", with: "")
                 l.replaceSubrange(range, with: compact)
             }
