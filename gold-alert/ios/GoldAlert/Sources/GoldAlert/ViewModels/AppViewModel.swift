@@ -389,20 +389,6 @@ final class AppViewModel: ObservableObject {
         return Self.buildGrid(centerPrice: price, step: step)
     }
 
-    /// 「全取消」：先按现价与间隔重新计算全部通知，再把它们全部关闭，
-    /// 立即保存到服务器（ren 2026-10-28 改定；不删列表，价格是新算的）。
-    func disableAllAlerts() async {
-        alertsDirty = true
-        guard let grid = await regeneratedGrid() else { return }
-        alerts = grid.map { item in
-            var item = item
-            item.enabled = false
-            return item
-        }
-        persistState()
-        await saveAlerts()
-    }
-
     /// 「全设定」：先按现价与间隔重新计算全部通知，再按网格默认状态设定
     /// （第 8 项即网格起点保持关闭、其余全部打开、已触发标记清零），
     /// 立即保存到服务器（ren 2026-10-28 改定）。

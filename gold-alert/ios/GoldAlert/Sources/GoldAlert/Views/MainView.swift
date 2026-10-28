@@ -164,7 +164,7 @@ struct MainView: View {
         .padding(.vertical, 2)
     }
 
-    /// 间隔下拉 + 保存 + 全取消 + 全设定：一行四等分、全部等宽（间隔改动即立刻重新设定）。
+    /// 间隔下拉 + 保存 + 全设定：一行三等分、全部等宽（间隔改动即立刻重新设定）。
     private var toolbarRow: some View {
         HStack(spacing: 6) {
             Menu {
@@ -199,21 +199,8 @@ struct MainView: View {
             }
             .disabled(model.busy)
 
-            // 「全取消」与「全设定」两个独立按钮（ren 2026-10-28 改定）：
-            // 都是先按现价与间隔重新计算全部通知，再全部关闭（全取消）或
-            // 除第 8 项外全部打开（全设定），并立即保存到服务器。
-            Button {
-                Task { await model.disableAllAlerts() }
-            } label: {
-                Text("全取消")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 40)
-                    .background(Color(red: 0.75, green: 0.22, blue: 0.17))
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-            }
-            .disabled(model.busy)
-
+            // 「全设定」按钮（ren 2026-10-28 定）：先按现价与间隔重新计算
+            // 全部通知，再除第 8 项外全部打开，并立即保存到服务器。
             Button {
                 Task { await model.enableAllAlerts() }
             } label: {
