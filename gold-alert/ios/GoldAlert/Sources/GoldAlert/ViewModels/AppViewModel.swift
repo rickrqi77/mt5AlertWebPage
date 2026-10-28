@@ -369,11 +369,6 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    /// 底部按钮是否处于「全设定」模式：列表非空、且全部提醒都关着。
-    var allAlertsDisabled: Bool {
-        !alerts.isEmpty && alerts.allSatisfy { !$0.enabled }
-    }
-
     /// 按当前显示价格与当前间隔重新生成整份网格（与改间隔同一套 buildGrid
     /// 逻辑）：定价用画面现价，所选来源还没取到价时现取一次兜底；
     /// 仍取不到价则提示并返回 nil，画面列表保持不动。
