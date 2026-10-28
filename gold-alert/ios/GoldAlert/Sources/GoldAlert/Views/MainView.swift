@@ -4,7 +4,6 @@ struct MainView: View {
     @EnvironmentObject private var model: AppViewModel
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var liquidation = LiquidationViewModel()
-    @State private var confirmClear = false
     @State private var confirmSaveEmpty = false
     /// 点最终价弹出的明细页（公式各项可看可改）。
     @State private var showLiquidationDetail = false
@@ -19,7 +18,7 @@ struct MainView: View {
         VStack(alignment: .leading, spacing: 6) {
             header
             priceHero
-            // 提醒区域在上、按钮区（间隔/保存/清除）在最底部——两者对调（ren 23:10）。
+            // 提醒区域在上、按钮区（间隔/保存/全取消）在最底部——两者对调（ren 23:10）。
             alertsPanel
             toolbarRow
         }
@@ -50,12 +49,6 @@ struct MainView: View {
         }
         .sheet(isPresented: $showLiquidationDetail) {
             LiquidationDetailView(liquidation: liquidation)
-        }
-        .confirmationDialog("确定清除全部提醒？", isPresented: $confirmClear, titleVisibility: .visible) {
-            Button("清除", role: .destructive) {
-                Task { await model.clearAll() }
-            }
-            Button("取消", role: .cancel) {}
         }
         .confirmationDialog(
             "没有点「触发」的价格，EA 不会提醒。仍要保存吗？",
@@ -171,7 +164,7 @@ struct MainView: View {
         .padding(.vertical, 2)
     }
 
-    /// 间隔下拉 + 保存 + 清除：一行三等分（已取消「设定」按钮，间隔改动即立刻重新设定）。
+    /// 间隔下拉 + 保存 + 全取消：一行三等分（已取消「设定」按钮，间隔改动即立刻重新设定）。
     private var toolbarRow: some View {
         HStack(spacing: 6) {
             Menu {
@@ -206,13 +199,24 @@ struct MainView: View {
             }
             .disabled(model.busy)
 
+            // 「全取消 / 全设定」切换按钮（ren 2026-10-28，取代原「清除」）：
+            // 全取消只关掉所有提醒、不删列表；全部关着时按钮变「全设定」，
+            // 点了除第 8 项外全部打开。两种动作都立即保存到服务器。
             Button {
-                confirmClear = true
+                Task {
+                    if model.allAlertsDisabled {
+                        await model.enableAllAlerts()
+                    } else {
+                        await model.disableAllAlerts()
+                    }
+                }
             } label: {
-                Text("清除")
+                Text(model.allAlertsDisabled ? "全设定" : "全取消")
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 40)
-                    .background(Color(red: 0.75, green: 0.22, blue: 0.17))
+                    .background(model.allAlertsDisabled
+                                ? Color.appButton
+                                : Color(red: 0.75, green: 0.22, blue: 0.17))
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
             }

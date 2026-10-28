@@ -369,24 +369,35 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func clearAll() async {
-        alerts = []
-        alertsDirty = true
-        busy = true
-        defer { busy = false }
-        do {
-            _ = try await CloudflareClient.shared.saveAlerts(
-                baseURL: baseURL,
-                token: token,
-                alerts: [],
-                step: step
-            )
-            alertsDirty = false
-            persistState()
-            showToast("已全部清除", error: false)
-        } catch {
-            showToast(error.localizedDescription, error: true)
+    /// 底部按钮是否处于「全设定」模式：列表非空、且全部提醒都关着。
+    var allAlertsDisabled: Bool {
+        !alerts.isEmpty && alerts.allSatisfy { !$0.enabled }
+    }
+
+    /// 「全取消」：不删除画面上的列表，只把所有提醒关掉，并立即保存到
+    /// 服务器（ren 2026-10-28 改定，取代原「清除」删列表的行为）。
+    func disableAllAlerts() async {
+        for index in alerts.indices {
+            alerts[index].enabled = false
         }
+        alertsDirty = true
+        await saveAlerts()
+    }
+
+    /// 「全设定」：除第 8 项（第 8 行、网格起点）保持关闭外，其余全部打开
+    /// （打开的项清掉已触发标记、重新待命，与单行 toggleArm 一致），
+    /// 并立即保存到服务器（ren 2026-10-28）。
+    func enableAllAlerts() async {
+        for index in alerts.indices {
+            if index == 7 {
+                alerts[index].enabled = false
+            } else {
+                alerts[index].enabled = true
+                alerts[index].triggered = false
+            }
+        }
+        alertsDirty = true
+        await saveAlerts()
     }
 
     func togglePause() async {
