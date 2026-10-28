@@ -86,6 +86,16 @@ print(f"CFBundleVersion {cur or '?'}->{nxt}")
 PY
 fi
 
+# 图标：仓库里只存 Icon.png.b64（base64 文本），编译前还原成 Icon.png。
+if [[ -f "$ios_dir/Icon.png.b64" ]]; then
+  python3 - "$ios_dir/Icon.png.b64" "$ios_dir/Icon.png" <<'PY'
+import base64, sys
+data = base64.b64decode(open(sys.argv[1], encoding="utf-8").read())
+open(sys.argv[2], "wb").write(data)
+print(f"图标已还原 Icon.png（{len(data)} 字节）")
+PY
+fi
+
 echo "编译（xtool release IPA）..."
 build_log="$(mktemp)"
 built_after="$(date +%s)"
