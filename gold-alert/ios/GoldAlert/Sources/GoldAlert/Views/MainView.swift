@@ -18,7 +18,7 @@ struct MainView: View {
         VStack(alignment: .leading, spacing: 6) {
             header
             priceHero
-            // 提醒区域在上、按钮区（间隔/保存/全取消）在最底部——两者对调（ren 23:10）。
+            // 提醒区域在上、按钮区（间隔/保存/全设定）在最底部——两者对调（ren 23:10）。
             alertsPanel
             toolbarRow
         }
