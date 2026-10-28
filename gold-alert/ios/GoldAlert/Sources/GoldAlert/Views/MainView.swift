@@ -128,7 +128,8 @@ struct MainView: View {
     private var priceHero: some View {
         VStack(spacing: 3) {
             // 不再单独占一行显示 XAUUSD：只剩价格行，接通状态点（绿/红）放在价格右边。
-            // 价格按所选来源显示（EA 推送价或 Swiss 报价），不可点击（已取消点价格改刷新间隔的功能）。
+            // 价格按所选来源显示（EA 推送价或 Swiss 报价）。点实时价同样弹出
+            // 最终价计算画面（ren 2026-10-28 追加；更早的「点价格改刷新间隔」仍是取消的）。
             ZStack {
                 // 实时价格只按数字本身居中（圆点不参与居中计算）：
                 // Text 作为 ZStack 直接子视图被居中，圆点用 overlay 贴在数字
@@ -136,6 +137,8 @@ struct MainView: View {
                 Text(format(model.displayPrice))
                     .font(.system(size: 32, weight: .bold).monospacedDigit())
                     .foregroundStyle(.primary)
+                    .contentShape(Rectangle())
+                    .onTapGesture { showLiquidationDetail = true }
                     .overlay(alignment: .trailing) {
                         Circle()
                             .fill(model.eaOnline
@@ -149,16 +152,24 @@ struct MainView: View {
             }
             .frame(maxWidth: .infinity)
 
-            // 最终价：不带文字标签，只显示价格本身（计算结果最后一步的值），居中，
-            // 比实时价小一号。从未计算成功过显示 0；成功过则默认显示上次结果，
-            // 读到新图算成功才刷新。点击弹出最终价明细页：公式各项的值都能看，
-            // 还能手工修改，保存后按新值重算（ren 2026-10-28 要求）。
-            Text(formatFinalPrice(liquidation.displayedLiquidationPrice))
-                .font(.system(size: 24, weight: .bold).monospacedDigit())
-                .foregroundStyle(Color.appAccentText)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .contentShape(Rectangle())
-                .onTapGesture { showLiquidationDetail = true }
+            // 平均价与最终价在同一行左右显示、中间一条竖线隔开（ren 2026-10-28）：
+            // 左边平均价（普通色，两位小数；还没有持仓数据显示 --），右边最终价
+            //（强调蓝，计算结果最后一步的值；从未计算成功过显示 0，成功过则显示
+            // 上次结果，读到新图算成功才刷新）。整行可点，弹出最终价明细页。
+            HStack(spacing: 14) {
+                Text(averagePriceText)
+                    .font(.system(size: 24, weight: .bold).monospacedDigit())
+                    .foregroundStyle(.primary)
+                Rectangle()
+                    .fill(Color.primary.opacity(0.35))
+                    .frame(width: 1, height: 22)
+                Text(formatFinalPrice(liquidation.displayedLiquidationPrice))
+                    .font(.system(size: 24, weight: .bold).monospacedDigit())
+                    .foregroundStyle(Color.appAccentText)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .onTapGesture { showLiquidationDetail = true }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 2)
@@ -372,5 +383,11 @@ struct MainView: View {
     private func formatFinalPrice(_ value: Double) -> String {
         guard value > 0 else { return "0" }
         return String(format: "%.2f", value)
+    }
+
+    /// 主画面与最终价同行的平均价：有持仓数据时四舍五入到两位小数，没有时 --。
+    private var averagePriceText: String {
+        guard liquidation.averageEntry > 0 else { return "--" }
+        return String(format: "%.2f", liquidation.averageEntry)
     }
 }

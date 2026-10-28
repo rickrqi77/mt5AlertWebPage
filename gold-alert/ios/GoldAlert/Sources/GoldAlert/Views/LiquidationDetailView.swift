@@ -148,8 +148,10 @@ struct LiquidationDetailView: View {
         let inputs = liquidation.currentInputs
         balanceText = inputText(inputs.balance)
         marginText = inputText(inputs.margin)
-        averageText = inputText(inputs.averageEntry)
-        lotsText = inputText(inputs.totalLots)
+        // 平均价与合计手数四舍五入到两位小数再显示（ren 2026-10-28 要求平均价；
+        // 手数同理，避免 4030.4999… / 0.1500000002 这类长尾小数挤满输入框）。
+        averageText = roundedText(inputs.averageEntry)
+        lotsText = roundedText(inputs.totalLots)
         side = inputs.side ?? .buy
         if liquidation.usdJpyRate > 0 {
             rateText = inputText(liquidation.usdJpyRate)
@@ -177,6 +179,12 @@ struct LiquidationDetailView: View {
 
     private func fmt(_ value: Double) -> String {
         String(format: "%.2f", value)
+    }
+
+    /// 两位小数写法：0 显示为空，其余四舍五入到两位小数（如 4030.68）。
+    private func roundedText(_ value: Double) -> String {
+        guard value != 0 else { return "" }
+        return String(format: "%.2f", value)
     }
 
     /// 输入框初始值：0 显示为空（方便直接输入），其余用最短精确写法（如 4012.93）。
