@@ -36,13 +36,12 @@ struct AlertRowView: View {
                 .layoutPriority(2)
 
             // 价格数字：无背景框，与背景同色（整行不要独立底色，ren 23:10 定版）。
-            // 在价格上左右滑动以 0.5 为单位调价（见 priceSwipeGesture）。
+            // 滑动调价手势挂在整行上（见 body 末尾），不只价格这一小块。
             SelectAllPriceField(text: priceBinding)
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
             .frame(minWidth: 108, maxWidth: 108, minHeight: 36, alignment: .leading)
             .contentShape(Rectangle())
-            .simultaneousGesture(priceSwipeGesture)
 
             // 盈亏数字：价格与触发按钮之间，显示两位小数，无背景框。
             // 宽度给足以原字体大小完整显示大数字（如 -12345.67），不许缩小字体。
@@ -87,9 +86,13 @@ struct AlertRowView: View {
                     .frame(height: 1)
             }
         }
+        // 滑动调价：在整行任意位置左右滑动都能调（ren 2026-10-28 改定，
+        // 原来只在价格数字上）。simultaneous 不挡点按：价格仍可点开编辑、
+        // 右侧按钮仍可点；纵向拖动仍是列表滚动（手势内按横向主导判定）。
+        .simultaneousGesture(priceSwipeGesture)
     }
 
-    /// 在价格上左右滑动调价（ren 2026-10-28 恢复此手势，滑动删除取消）：
+    /// 在整行任意位置左右滑动调价（ren 2026-10-28 恢复此手势、同日晚改整行，滑动删除取消）：
     /// 横向每滑约 28pt 调整 0.5——右滑加、左滑减。拖动中即时写回模型，
     /// 价格与本行盈亏数字同步变化；只认横向滑动，纵向仍是列表滚动。
     /// 起始价在拖动开始时以模型当前价为准，避免中途被轮询刷新带偏。
