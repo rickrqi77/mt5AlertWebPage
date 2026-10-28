@@ -374,29 +374,48 @@ final class AppViewModel: ObservableObject {
         !alerts.isEmpty && alerts.allSatisfy { !$0.enabled }
     }
 
-    /// 「全取消」：不删除画面上的列表，只把所有提醒关掉，并立即保存到
-    /// 服务器（ren 2026-10-28 改定，取代原「清除」删列表的行为）。
-    func disableAllAlerts() async {
-        for index in alerts.indices {
-            alerts[index].enabled = false
+    /// 按当前显示价格与当前间隔重新生成整份网格（与改间隔同一套 buildGrid
+    /// 逻辑）：定价用画面现价，所选来源还没取到价时现取一次兜底；
+    /// 仍取不到价则提示并返回 nil，画面列表保持不动。
+    private func regeneratedGrid() async -> [AlertItem]? {
+        var price = displayPrice
+        if price <= 0 {
+            if priceSource == .ea {
+                await refreshCloudState()
+            } else {
+                await refreshSwissPrice()
+            }
+            price = displayPrice
         }
+        guard price > 0 else {
+            showToast(priceSource == .ea ? "还没有 EA 价格" : "还没有 Swiss 价格", error: true)
+            return nil
+        }
+        return Self.buildGrid(centerPrice: price, step: step)
+    }
+
+    /// 「全取消」：先按现价与间隔重新计算全部通知，再把它们全部关闭，
+    /// 立即保存到服务器（ren 2026-10-28 改定；不删列表，价格是新算的）。
+    func disableAllAlerts() async {
         alertsDirty = true
+        guard let grid = await regeneratedGrid() else { return }
+        alerts = grid.map { item in
+            var item = item
+            item.enabled = false
+            return item
+        }
+        persistState()
         await saveAlerts()
     }
 
-    /// 「全设定」：除第 8 项（第 8 行、网格起点）保持关闭外，其余全部打开
-    /// （打开的项清掉已触发标记、重新待命，与单行 toggleArm 一致），
-    /// 并立即保存到服务器（ren 2026-10-28）。
+    /// 「全设定」：先按现价与间隔重新计算全部通知，再按网格默认状态设定
+    /// （第 8 项即网格起点保持关闭、其余全部打开、已触发标记清零），
+    /// 立即保存到服务器（ren 2026-10-28 改定）。
     func enableAllAlerts() async {
-        for index in alerts.indices {
-            if index == 7 {
-                alerts[index].enabled = false
-            } else {
-                alerts[index].enabled = true
-                alerts[index].triggered = false
-            }
-        }
         alertsDirty = true
+        guard let grid = await regeneratedGrid() else { return }
+        alerts = grid
+        persistState()
         await saveAlerts()
     }
 
