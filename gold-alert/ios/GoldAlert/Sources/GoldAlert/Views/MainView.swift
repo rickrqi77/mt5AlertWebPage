@@ -153,13 +153,13 @@ struct MainView: View {
             .frame(maxWidth: .infinity)
 
             // 平均价与最终价在同一行左右显示、中间一条竖线隔开（ren 2026-10-28）：
-            // 左边平均价（普通色，两位小数；还没有持仓数据显示 --），右边最终价
+            // 左边平均价、右边最终价，两者同色（appAccentText 蓝；平均价两位小数，还没有持仓数据显示 --），最终价
             //（强调蓝，计算结果最后一步的值；从未计算成功过显示 0，成功过则显示
             // 上次结果，读到新图算成功才刷新）。整行可点，弹出最终价明细页。
             HStack(spacing: 14) {
                 Text(averagePriceText)
                     .font(.system(size: 24, weight: .bold).monospacedDigit())
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.appAccentText)
                 Rectangle()
                     .fill(Color.primary.opacity(0.35))
                     .frame(width: 1, height: 22)
