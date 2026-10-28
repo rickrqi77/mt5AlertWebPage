@@ -141,7 +141,11 @@ enum MT5ScreenshotParser {
             i += 1
         }
 
-        return dedupe(positions)
+        // 不要去重：同价同手数的两行是两笔真实订单（2026-10-28 ren 截图实证：
+        // 两笔 buy 0.1 @4030.94 曾被旧 dedupe 合并成一笔，合计手数 0.25 误读
+        // 成 0.15、平均价与最终价全错）。OCR 每行只出现一次，同行重复出现
+        // 就是图上有几笔。
+        return positions
     }
 
     private static func goldSymbol(in line: String) -> String? {
@@ -208,20 +212,6 @@ enum MT5ScreenshotParser {
             if prices.count >= 2 { return prices[0] }
         }
         return nil
-    }
-
-    private static func dedupe(_ positions: [GoldPosition]) -> [GoldPosition] {
-        var out: [GoldPosition] = []
-        for p in positions {
-            let dup = out.contains {
-                $0.symbol == p.symbol
-                    && $0.side == p.side
-                    && abs($0.lots - p.lots) < 1e-9
-                    && abs($0.entryPrice - p.entryPrice) < 1e-6
-            }
-            if !dup { out.append(p) }
-        }
-        return out
     }
 
     private static func isGoldPrice(_ value: Double) -> Bool {
