@@ -352,7 +352,11 @@ struct MainView: View {
     /// 每行盈亏数字：价格到达这一行通知价时，持仓的实际盈亏（与 MT5 显示同号）。
     /// buy：(通知价格 − 平均价) × 合计手数 × 100；
     /// sell：方向相反，结果乘 −1（即 (平均价 − 通知价) × 合计手数 × 100）。
-    /// 日元模式再除以美日实时汇率。结果显示两位小数（行内格式化）。
+    /// 括号里算的是美元盈亏（金价以美元计、1 手 = 100 盎司）；日元模式（账户
+    /// 货币是日元）下 MT5 显示的盈亏是日元，再乘以美日实时汇率换算。
+    /// 2026-10-30 ren 截图实证：sell 0.05 @4019.91、现价 4011.31，美元盈亏
+    /// 8.60×0.05×100 = 43.00，×157.717 = 6781.8 ≈ MT5 显示 6 781 JPY；
+    /// 旧版误用除法，结果差了汇率平方倍。结果显示两位小数（行内格式化）。
     /// 注：原公式 (平均价 − 通知价格) 算出的符号正好反了（2026-10-27 23:25 ren
     /// 用 MT5 截图核对：现价处应为 +465.80、原公式得 −465.80），已按实际盈亏改定。
     /// 平均价 = 所有开单价格的平均价（按手数加权，与最终价计算用的同一个平均价），
@@ -364,7 +368,7 @@ struct MainView: View {
         var value = (alertPrice - liquidation.averageEntry) * liquidation.totalLots * 100
         if liquidation.mode == .jpy {
             guard liquidation.usdJpyRate > 0 else { return nil }
-            value /= liquidation.usdJpyRate
+            value *= liquidation.usdJpyRate
         }
         if liquidation.positionSide == .sell {
             value *= -1

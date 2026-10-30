@@ -108,43 +108,55 @@ enum MT5ScreenshotParser {
     // MARK: - Positions
 
     private static func extractGoldPositions(from lines: [String]) -> [GoldPosition] {
-        var positions: [GoldPosition] = []
-        var i = 0
-        while i < lines.count {
-            let line = lines[i]
-            guard let symbol = goldSymbol(in: line) else {
-                i += 1
-                continue
+        // 第一步：收集全部持仓起点（含 GOLD/XAU 品种的行）。方向+手数就在该行
+        // 上（MT5 排版如「GOLD# sell 0.05」），或紧随的一两行内；查找止于下一个
+        // 品种行，避免把下一笔的方向手数串过来。
+        var starts: [(index: Int, symbol: String, side: PositionSide, lots: Double)] = []
+        for (index, line) in lines.enumerated() {
+            guard let symbol = goldSymbol(in: line) else { continue }
+            var end = min(index + 3, lines.count)
+            var j = index + 1
+            while j < end {
+                if goldSymbol(in: lines[j]) != nil { end = j; break }
+                j += 1
             }
-
-            // Same line, or next few lines: "sell 0.01" / "buy 0.01"
-            let window = Array(lines[i..<min(i + 4, lines.count)])
-            guard let sideLots = detectSideAndLots(in: window) else {
-                i += 1
-                continue
+            if let sideLots = detectSideAndLots(in: Array(lines[index..<end])) {
+                starts.append((index: index, symbol: symbol, side: sideLots.side, lots: sideLots.lots))
             }
-
-            // Price line is under the GOLD row, e.g. "3988.21 → 3989.22" → use 3988.21
-            guard let entry = leftEntryPrice(in: window) else {
-                i += 1
-                continue
-            }
-
-            positions.append(
-                GoldPosition(
-                    symbol: symbol,
-                    side: sideLots.side,
-                    lots: sideLots.lots,
-                    entryPrice: entry
-                )
-            )
-            i += 1
         }
 
-        // 不要去重：同价同手数的两行是两笔真实订单（2026-10-28 ren 截图实证：
-        // 两笔 buy 0.1 @4030.94 曾被旧 dedupe 合并成一笔，合计手数 0.25 误读
-        // 成 0.15、平均价与最终价全错）。OCR 每行只出现一次，同行重复出现
-        // 就是图上有几笔。
+        // 第二步：收集全部开仓价（「开仓价 → 现价」的左侧价），保持行序；
+        // 同一行有多个箭头价对时逐个收。
+        var priceEntries: [(index: Int, price: Double)] = []
+        for (index, line) in lines.enumerated() {
+            for price in entryPrices(inLine: line) {
+                priceEntries.append((index: index, price: price))
+            }
+        }
+
+        // 第三步：按顺序一一配对——第 k 笔持仓取它品种行之后（含本行）、还没被
+        // 前面持仓用掉的第一条价格。旧做法「品种行后 4 行窗口里找价格」在
+        // Vision 行序交错时会整笔漏掉：2026-10-30 ren 截图（两笔 sell 0.05
+        // @4019.91/@4025.39）只读出一笔，合计手数 0.10 变 0.05、平均价只剩
+        // 第一笔的开仓价，因第二笔的价格行落在了窗口外。配对只按先后顺序，
+        // 不按内容去重：同方向同手数的重复行就是多笔真实订单（2026-10-28
+        // dedupe 误杀的教训同样适用）。
+        var used = Set<Int>()
+        var positions: [GoldPosition] = []
+        for start in starts {
+            guard let found = priceEntries.enumerated().first(where: {
+                $0.element.index >= start.index && !used.contains($0.offset)
+            }) else { continue }
+            used.insert(found.offset)
+            positions.append(
+                GoldPosition(
+                    symbol: start.symbol,
+                    side: start.side,
+                    lots: start.lots,
+                    entryPrice: found.element.price
+                )
+            )
+        }
         return positions
     }
 
@@ -191,27 +203,26 @@ enum MT5ScreenshotParser {
         }
     }
 
-    /// Left number of `开仓价 → 现价` under GOLD.
+    /// 一行里全部 `开仓价 → 现价` 的左侧开仓价（通常一个）。
     /// Do not treat the hyphen inside `GOLD24-7` as a price arrow.
-    private static func leftEntryPrice(in lines: [String]) -> Double? {
+    private static func entryPrices(inLine line: String) -> [Double] {
         // Both sides must look like gold prices (3+ digits). No bare "-" (breaks GOLD24-7).
         let arrow = try! NSRegularExpression(
             pattern: #"([0-9]{3,}(?:\.[0-9]+)?)\s*(?:→|->|➜|⇒|—|–|>|›|»|\s-\s)\s*([0-9]{3,}(?:\.[0-9]+)?)"#
         )
-        for line in lines {
-            let ns = line as NSString
-            let full = NSRange(location: 0, length: ns.length)
-            let matches = arrow.matches(in: line, options: [], range: full)
-            for pm in matches where pm.numberOfRanges >= 3 {
-                let left = Double(ns.substring(with: pm.range(at: 1))) ?? 0
-                let right = Double(ns.substring(with: pm.range(at: 2))) ?? 0
-                if isGoldPrice(left), isGoldPrice(right) { return left }
-            }
-            // No arrow glyph: two gold-range prices on one line → left is entry.
-            let prices = allNumbers(in: line).filter(isGoldPrice)
-            if prices.count >= 2 { return prices[0] }
+        let ns = line as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        var result: [Double] = []
+        for pm in arrow.matches(in: line, options: [], range: full) where pm.numberOfRanges >= 3 {
+            let left = Double(ns.substring(with: pm.range(at: 1))) ?? 0
+            let right = Double(ns.substring(with: pm.range(at: 2))) ?? 0
+            if isGoldPrice(left), isGoldPrice(right) { result.append(left) }
         }
-        return nil
+        if !result.isEmpty { return result }
+        // No arrow glyph: two gold-range prices on one line → left is entry.
+        let prices = allNumbers(in: line).filter(isGoldPrice)
+        if prices.count >= 2 { return [prices[0]] }
+        return []
     }
 
     private static func isGoldPrice(_ value: Double) -> Bool {
@@ -233,7 +244,12 @@ enum MT5ScreenshotParser {
             // 空格前的整数必须是独立整数（前面不能是数字或小数点），否则持仓行
             // 同一行里的「buy 0.2 683.40」（手数 + 盈亏）会被拼成 0.2683.40，
             // 手数被误读成 0.2683（2026-10-27 实测踩中：0.2 与 675.xx 拼成 0.2675）。
-            while let range = l.range(of: #"(^|[^0-9.])(\d+) (\d{3}(?:\D|$))"#, options: .regularExpression) {
+            // 前置条件必须用 lookbehind 不能消费掉：旧写法 (^|[^0-9.]) 会把整数前
+            // 的分隔空格一起吃进匹配，压缩时连它一起删掉，把前面的手数和盈亏粘
+            // 成一个数——「sell 0.05 6 781」→「sell 0.056781」，手数变成六位小数
+            // 被判无效、整笔持仓被跳过（2026-10-30 实测：两笔 sell 0.05 只读到
+            // 第一笔，日元账户盈亏带千分位空格、同行排版时踩中）。
+            while let range = l.range(of: #"(?<![0-9.])(\d+) (\d{3}(?:\D|$))"#, options: .regularExpression) {
                 let compact = l[range].replacingOccurrences(of: " ", with: "")
                 l.replaceSubrange(range, with: compact)
             }
