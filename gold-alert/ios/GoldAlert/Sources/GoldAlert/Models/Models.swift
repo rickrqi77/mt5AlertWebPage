@@ -24,10 +24,16 @@ struct AlertItem: Identifiable, Equatable, Hashable, Sendable, Codable {
         Double(priceText.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    /// 列表行身份：价格或状态一变就视为新行。这是行在列表中唯一的身份
-    /// （ForEach 与 .id 都用它）；绝不能再叠加 .id(行号) 按位置认行——
-    /// 按位置复用旧行视图正是历次「新旧混合」截图的来源。
-    var rowKey: String { "\(localID.uuidString)|\(priceText)|\(enabled)|\(triggered)" }
+    /// 列表行身份：只能用稳定的 localID（ForEach 与 .id 都用它），
+    /// 绝不能把价格/状态拼进去，更不能叠加 .id(行号) 按位置认行。
+    /// 价格是可编辑内容：拼进身份的话，用户在输入框打一个数字、
+    /// priceText 一变身份就变，SwiftUI 会把整行当新行销毁重建，
+    /// 正在编辑的 UITextField 随之被销毁、键盘立刻消失
+    /// （ren 2026-10-30 实报：点价格输入框打一个数字键盘就没了）。
+    /// 防新旧混合不靠内容身份：价格已无行内草稿、直接绑定模型值；
+    /// 重新生成网格时每行都是新 localID，云端刷新也只在价格对上时
+    /// 才继承旧 localID（见 refreshCloudState），身份不同不复用旧行。
+    var rowKey: String { localID.uuidString }
 }
 
 struct StatusPayload: Decodable, Sendable {
