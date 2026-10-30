@@ -3,9 +3,12 @@ import SwiftUI
 struct AlertRowView: View {
     let index: Int
     let item: AlertItem
-    /// 这一行「到达通知价时的盈亏」（按当前模式公式算好后传入，显示两位小数）；
+    /// 这一行「到达通知价时的盈亏」（按当前模式公式算好后传入）；
     /// 算不出时为 nil，显示 --。
     let pnl: Double?
+    /// 日元模式下盈亏只显示整数、不带小数（ren 2026-10-30：日元收益金额大、
+    /// MT5 本身也只显示整数日元）；美元模式仍显示两位小数。
+    let pnlInteger: Bool
     let onPriceChange: (String) -> Void
     let onToggleArm: () -> Void
 
@@ -120,7 +123,7 @@ struct AlertRowView: View {
 
     private var pnlText: String {
         guard let pnl else { return "--" }
-        return String(format: "%.2f", pnl)
+        return pnlInteger ? String(format: "%.0f", pnl) : String(format: "%.2f", pnl)
     }
 
     private var pnlColor: Color {

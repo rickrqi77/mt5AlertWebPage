@@ -256,6 +256,7 @@ struct MainView: View {
                                 index: index,
                                 item: item,
                                 pnl: pnl(for: item),
+                                pnlInteger: liquidation.mode == .jpy,
                                 onPriceChange: { model.updatePrice(at: index, text: $0) },
                                 onToggleArm: { model.toggleArm(at: index) }
                             )
@@ -356,7 +357,8 @@ struct MainView: View {
     /// 货币是日元）下 MT5 显示的盈亏是日元，再乘以美日实时汇率换算。
     /// 2026-10-30 ren 截图实证：sell 0.05 @4019.91、现价 4011.31，美元盈亏
     /// 8.60×0.05×100 = 43.00，×157.717 = 6781.8 ≈ MT5 显示 6 781 JPY；
-    /// 旧版误用除法，结果差了汇率平方倍。结果显示两位小数（行内格式化）。
+    /// 旧版误用除法，结果差了汇率平方倍。显示：美元模式两位小数，日元模式
+    /// 只显示整数（ren 2026-10-30）。
     /// 注：原公式 (平均价 − 通知价格) 算出的符号正好反了（2026-10-27 23:25 ren
     /// 用 MT5 截图核对：现价处应为 +465.80、原公式得 −465.80），已按实际盈亏改定。
     /// 平均价 = 所有开单价格的平均价（按手数加权，与最终价计算用的同一个平均价），
