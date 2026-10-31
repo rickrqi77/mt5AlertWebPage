@@ -8,6 +8,10 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>xauusd</string>
+	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>读取交易截图以计算黄金持仓最终价，并可在计算后删除该截图。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

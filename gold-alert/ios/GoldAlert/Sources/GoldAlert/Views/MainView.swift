@@ -3,6 +3,7 @@ import SwiftUI
 struct MainView: View {
     @EnvironmentObject private var model: AppViewModel
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @StateObject private var liquidation = LiquidationViewModel()
     @State private var confirmSaveEmpty = false
     /// 点最终价弹出的明细页（公式各项可看可改）。
@@ -122,6 +123,25 @@ struct MainView: View {
             Spacer()
             // 右上角不放「退出」按钮（ren 21:54 要求去掉）；退出登录逻辑本身保留，
             // Token 失效时仍会自动回到解锁画面。
+            // 右上角透明热区：双击跳转到 XAU app（ren 2026-10-31）。不显示
+            // 任何东西、单击无动作，避免误触；跳转走 XAU app 注册的
+            // xauusd scheme，对方没装/没注册时 openURL 回报失败、弹提示。
+            Color.clear
+                .frame(width: 72, height: 36)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) { openXAUApp() }
+                .accessibilityHidden(true)
+        }
+    }
+
+    /// 双击主画面右上角：用 xauusd scheme 把 XAU app 拉到前台；
+    /// 打不开（未安装或对方还是没注册 scheme 的旧版）时弹提示，不假装成功。
+    private func openXAUApp() {
+        guard let url = URL(string: "xauusd://") else { return }
+        openURL(url) { accepted in
+            if !accepted {
+                model.showToast("打不开 XAU（未装或未更新）", error: true)
+            }
         }
     }
 
