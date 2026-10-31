@@ -123,18 +123,18 @@ struct MainView: View {
             Spacer()
             // 右上角不放「退出」按钮（ren 21:54 要求去掉）；退出登录逻辑本身保留，
             // Token 失效时仍会自动回到解锁画面。
-            // 右上角透明热区：双击跳转到 XAU app（ren 2026-10-31）。不显示
-            // 任何东西、单击无动作，避免误触；跳转走 XAU app 注册的
-            // xauusd scheme，对方没装/没注册时 openURL 回报失败、弹提示。
+            // 右上角透明热区：单击跳转到 XAU app（ren 2026-10-31 定，
+            // 当日早先是双击、同日晚改单击）。不显示任何东西；跳转走 XAU app
+            // 注册的 xauusd scheme，对方没装/没注册时 openURL 回报失败、弹提示。
             Color.clear
                 .frame(width: 72, height: 36)
                 .contentShape(Rectangle())
-                .onTapGesture(count: 2) { openXAUApp() }
+                .onTapGesture { openXAUApp() }
                 .accessibilityHidden(true)
         }
     }
 
-    /// 双击主画面右上角：用 xauusd scheme 把 XAU app 拉到前台；
+    /// 单击主画面右上角：用 xauusd scheme 把 XAU app 拉到前台；
     /// 打不开（未安装或对方还是没注册 scheme 的旧版）时弹提示，不假装成功。
     private func openXAUApp() {
         guard let url = URL(string: "xauusd://") else { return }
@@ -145,11 +145,24 @@ struct MainView: View {
         }
     }
 
+    /// 点实时价格数字：用 metatrader5 scheme 把 MetaTrader 5 拉到前台
+    /// （ren 2026-10-31 定；最终价画面改由点平均价/最终价行打开）。
+    /// 打不开（未安装）时弹提示，不假装成功。
+    private func openMT5App() {
+        guard let url = URL(string: "metatrader5://") else { return }
+        openURL(url) { accepted in
+            if !accepted {
+                model.showToast("打不开 MetaTrader 5（未安装）", error: true)
+            }
+        }
+    }
+
     private var priceHero: some View {
         VStack(spacing: 3) {
             // 不再单独占一行显示 XAUUSD：只剩价格行，接通状态点（绿/红）放在价格右边。
-            // 价格按所选来源显示（EA 推送价或 Swiss 报价）。点实时价同样弹出
-            // 最终价计算画面（ren 2026-10-28 追加；更早的「点价格改刷新间隔」仍是取消的）。
+            // 价格按所选来源显示（EA 推送价或 Swiss 报价）。点实时价跳转到
+            // MetaTrader 5（ren 2026-10-31 改定，取代 2026-10-28 的「点实时价
+            // 弹最终价画面」；最终价画面只从下方平均价/最终价行打开）。
             ZStack {
                 // 实时价格只按数字本身居中（圆点不参与居中计算）：
                 // Text 作为 ZStack 直接子视图被居中，圆点用 overlay 贴在数字
@@ -158,7 +171,7 @@ struct MainView: View {
                     .font(.system(size: 32, weight: .bold).monospacedDigit())
                     .foregroundStyle(.primary)
                     .contentShape(Rectangle())
-                    .onTapGesture { showLiquidationDetail = true }
+                    .onTapGesture { openMT5App() }
                     .overlay(alignment: .trailing) {
                         Circle()
                             .fill(model.eaOnline
@@ -175,7 +188,8 @@ struct MainView: View {
             // 平均价与最终价在同一行左右显示、中间一条竖线隔开（ren 2026-10-28）：
             // 左边平均价、右边最终价，两者同色（appAccentText 蓝；平均价两位小数，还没有持仓数据显示 --），最终价
             //（强调蓝，计算结果最后一步的值；从未计算成功过显示 0，成功过则显示
-            // 上次结果，读到新图算成功才刷新）。整行可点，弹出最终价明细页。
+            // 上次结果，读到新图算成功才刷新）。整行可点，弹出最终价明细页
+            //（ren 2026-10-31 起最终价画面只从这一行打开，实时价改跳 MT5）。
             HStack(spacing: 14) {
                 Text(averagePriceText)
                     .font(.system(size: 24, weight: .bold).monospacedDigit())

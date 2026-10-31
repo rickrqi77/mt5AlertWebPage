@@ -11,6 +11,7 @@
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>xauusd</string>
+		<string>metatrader5</string>
 	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
