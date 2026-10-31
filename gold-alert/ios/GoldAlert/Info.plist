@@ -12,6 +12,17 @@
 	<array>
 		<string>xauusd</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.rickrqi77.goldalert</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>goldalert</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>读取交易截图以计算黄金持仓最终价，并可在计算后删除该截图。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
