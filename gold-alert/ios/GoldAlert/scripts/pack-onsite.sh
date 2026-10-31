@@ -58,7 +58,13 @@ if [[ "${DO_PULL:-1}" == "1" ]]; then
     cd "$repo_dir"
     git fetch origin || true
     if git show-ref --verify --quiet refs/remotes/origin/main; then
-      git pull --ff-only origin main || git pull origin main || true
+      if ! git pull --ff-only origin main && ! git pull origin main; then
+        # pull 失败多半是本地改动挡路（典型：上次打包 bump 的 Info.plist 版本号）。
+        # 按 ren 2026-10-31 定：自动 reset --hard 对齐远端后再 pull 一次。
+        echo "git pull 失败，自动 git reset --hard 到 origin/main 后重试..."
+        git reset --hard origin/main || true
+        git pull --ff-only origin main || git pull origin main || true
+      fi
     fi
   )
 else
