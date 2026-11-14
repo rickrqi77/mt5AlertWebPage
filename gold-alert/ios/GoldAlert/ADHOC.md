@@ -35,6 +35,16 @@ cd gold-alert/ios/GoldAlert
 
 Safari 打开 https://w77.tail708c1b.ts.net/ ，在列表里点 **Safari 安装**（提醒事项）。
 
+## 3.5 手表端（可选）
+
+Apple Watch 端（`gold-alert/watchos/`）经 GitHub Actions 的 macOS runner
+编译，产物放回 `gold-alert/watchos/build/GoldAlertWatch.app` 后，本脚本会
+自动嵌入并签名。需要 `D:\goldalert\adhoc` 里另备两个描述文件：
+`goldalert-watch-adhoc.mobileprovision`（`com.rickrqi77.goldalert.watchkitapp`）、
+`goldalert-complication-adhoc.mobileprovision`（`com.rickrqi77.goldalert.watchkitapp.complication`）。
+完整步骤见 `gold-alert/watchos/README.md`。缺手表产物或描述文件时自动跳过，
+手机端打包不受影响。
+
 ## 4. 环境变量
 
 | 变量 | 默认 |

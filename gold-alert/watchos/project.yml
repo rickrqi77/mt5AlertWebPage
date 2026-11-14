@@ -1,0 +1,61 @@
+# XcodeGen 工程定义：xtool 不支持 watchOS，本工程只在 GitHub 的 macOS
+# runner 上用 xcodebuild 编译（见 .github/workflows/build-watch-app.yml），
+# 编出的未签名 .app 再回 WSL 由 pack-onsite.sh 嵌入 IPA、zsign 统一签名。
+name: GoldAlertWatch
+options:
+  bundleIdPrefix: com.rickrqi77
+  deploymentTarget:
+    watchOS: "10.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  GoldAlertWatch:
+    type: application
+    platform: watchOS
+    sources:
+      - path: GoldAlertWatch
+    info:
+      path: GoldAlertWatch/Info.plist
+      properties:
+        CFBundleDisplayName: 提醒事项
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.rickrqi77.goldalert
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rickrqi77.goldalert.watchkitapp
+        TARGETED_DEVICE_FAMILY: "4"
+        CODE_SIGN_STYLE: Manual
+    dependencies:
+      - target: GoldAlertComplication
+        embed: true
+  GoldAlertComplication:
+    type: app-extension
+    platform: watchOS
+    sources:
+      - path: GoldAlertComplication
+    info:
+      path: GoldAlertComplication/Info.plist
+      properties:
+        CFBundleDisplayName: 金价
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rickrqi77.goldalert.watchkitapp.complication
+        TARGETED_DEVICE_FAMILY: "4"
+        CODE_SIGN_STYLE: Manual
+schemes:
+  GoldAlertWatch:
+    build:
+      targets:
+        GoldAlertWatch: all
+    run:
+      config: Release

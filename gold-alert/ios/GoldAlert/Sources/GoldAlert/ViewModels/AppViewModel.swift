@@ -68,6 +68,12 @@ final class AppViewModel: ObservableObject {
         if let s = LocalCache.loadStep() { step = s }
         if let p = LocalCache.loadPaused() { alertsPaused = p }
         if let o = LocalCache.loadOnline() { eaOnline = o }
+        // 手表端：激活 WatchConnectivity，并把已有凭据同步给手表
+        // （手表收到后存自己的钥匙串，之后可独立取价、在表上推送间隔设定）。
+        WatchBridge.shared.activate()
+        if !token.isEmpty {
+            WatchBridge.shared.syncCredentials(baseURL: baseURL, token: token)
+        }
     }
 
     func onAppear() {
@@ -99,6 +105,7 @@ final class AppViewModel: ObservableObject {
             KeychainStore.saveBaseURL(base)
             tokenInput = ""
             isUnlocked = true
+            WatchBridge.shared.syncCredentials(baseURL: base, token: t)
             startLoops()
             showToast("已解锁", error: false)
         } catch {
@@ -110,6 +117,7 @@ final class AppViewModel: ObservableObject {
     func logout() {
         stopLoops()
         KeychainStore.clearToken()
+        WatchBridge.shared.syncCredentials(baseURL: "", token: "")
         token = ""
         tokenInput = ""
         alerts = []
