@@ -9,23 +9,39 @@ import SwiftUI
 struct WatchRootView: View {
     @EnvironmentObject private var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
+    @State private var selectedPage = 0
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedPage) {
             clockPage
+                .tag(0)
             settingsPage
+                .tag(1)
         }
         .tabViewStyle(.page)
         .onAppear { model.startAutoRefresh() }
         .onDisappear { model.stopAutoRefresh() }
         // 抬腕亮屏（app 回到激活态）时立刻先取一次价，不等循环节拍；
         // 放下手腕变非激活就停循环，省电也避免挂起期间的空转。
+        // 回第一页也在变非激活时就做完（那时屏幕正变暗/熄灭，看不见切换），
+        // 并禁用切换动画：下次亮屏直接停在第一页，没有翻页效果。
         .onChange(of: scenePhase) { phase in
             if phase == .active {
                 model.startAutoRefresh()
             } else {
                 model.stopAutoRefresh()
+                resetToClockPage()
             }
+        }
+    }
+
+    /// 无动画地切回第一页（时钟页）。
+    private func resetToClockPage() {
+        guard selectedPage != 0 else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            selectedPage = 0
         }
     }
 
