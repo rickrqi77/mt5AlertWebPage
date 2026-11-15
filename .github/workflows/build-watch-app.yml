@@ -1,0 +1,72 @@
+# xtool 绕路：watchOS 部分在 GitHub 的 macOS runner 上编译成未签名 .app，
+# 下载回 WSL 后由 gold-alert/ios/GoldAlert/scripts/pack-onsite.sh 在打包时
+# 自动嵌入 IPA 并用 zsign + 各自的 Ad Hoc 描述文件签名。
+name: Build Watch App
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "gold-alert/watchos/**"
+      - ".github/workflows/build-watch-app.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          xcodebuild -version
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer || true
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Prepare app icon (reuse iOS Icon.png.b64)
+        working-directory: gold-alert/watchos
+        run: |
+          mkdir -p GoldAlertWatch/Assets.xcassets/AppIcon.appiconset
+          base64 -d ../ios/GoldAlert/Icon.png.b64 > /tmp/watch-icon-raw.png
+          sips -z 1024 1024 /tmp/watch-icon-raw.png --out GoldAlertWatch/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+          cat > GoldAlertWatch/Assets.xcassets/Contents.json <<'JSON'
+          {"info":{"author":"xcode","version":1}}
+          JSON
+          cat > GoldAlertWatch/Assets.xcassets/AppIcon.appiconset/Contents.json <<'JSON'
+          {"images":[{"filename":"icon-1024.png","idiom":"watch","scale":"1x","size":"1024x1024"}],"info":{"author":"xcode","version":1}}
+          JSON
+
+      - name: Generate project
+        working-directory: gold-alert/watchos
+        run: xcodegen generate
+
+      - name: Build watch app (unsigned)
+        working-directory: gold-alert/watchos
+        run: |
+          xcodebuild build \
+            -project GoldAlertWatch.xcodeproj \
+            -scheme GoldAlertWatch \
+            -configuration Release \
+            -destination 'generic/platform=watchOS' \
+            -derivedDataPath build/DD \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon
+
+      - name: Package artifact
+        run: |
+          APP_PATH="$(find gold-alert/watchos/build/DD/Build/Products -name 'GoldAlertWatch.app' -type d | head -1)"
+          echo "Built: $APP_PATH"
+          test -n "$APP_PATH"
+          ditto -c -k --keepParent "$APP_PATH" GoldAlertWatch-app.zip
+          unzip -l GoldAlertWatch-app.zip | head -30
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GoldAlertWatch-app
+          path: GoldAlertWatch-app.zip
+          if-no-files-found: error

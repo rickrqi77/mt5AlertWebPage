@@ -23,6 +23,14 @@ bundle_id="com.rickrqi77.goldalert"
 app_title="${OTA_TITLE:-提醒事项}"
 ota_slug="${OTA_SLUG:-goldalert}"
 
+# 手表端（可选，见 gold-alert/watchos/README.md）：GitHub Actions 编好的
+# 未签名 GoldAlertWatch.app 放到仓库 gold-alert/watchos/build/ 下，且
+# adhoc 目录里备好手表/复杂功能描述文件时，打包自动嵌入并多描述文件签名；
+# 缺任一样则完全按原流程只打手机端。
+watch_app="${WATCH_APP:-$repo_dir/gold-alert/watchos/build/GoldAlertWatch.app}"
+watch_profile="$adhoc_dir/goldalert-watch-adhoc.mobileprovision"
+complication_profile="$adhoc_dir/goldalert-complication-adhoc.mobileprovision"
+
 die() { echo "$1" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "缺少 $1。$2"; }
 
@@ -115,6 +123,18 @@ fi
 [[ -n "$unsigned" && -f "$unsigned" ]] || die "没有找到编译出的 ipa。看上面的 xtool 输出。"
 echo "未签名的包：$unsigned"
 
+use_watch=0
+if [[ -d "$watch_app" && -f "$watch_profile" ]]; then
+  watch_profile_text="$(openssl cms -inform DER -in "$watch_profile" -verify -noverify 2>/dev/null || true)"
+  grep -q "com.rickrqi77.goldalert.watchkitapp" <<<"$watch_profile_text" \
+    || die "手表描述文件 Bundle ID 不是 com.rickrqi77.goldalert.watchkitapp：$watch_profile"
+  use_watch=1
+  echo "嵌入手表端 App：$watch_app"
+  embedded_ipa="$(mktemp --suffix=.ipa)"
+  bash "$script_dir/embed-watch-app.sh" "$unsigned" "$watch_app" "$embedded_ipa"
+  unsigned="$embedded_ipa"
+fi
+
 echo "Ad Hoc 签名..."
 mkdir -p "$adhoc_dir" "$ota_dir"
 merged_ents="$(mktemp --suffix=.entitlements)"
@@ -146,7 +166,19 @@ with open(out_path, "wb") as fh:
 print(ents.get("application-identifier"))
 PY
 
-zsign -f -k "$p12" -p "$password" -m "$profile" -e "$merged_ents" -o "$signed_ipa" "$unsigned"
+if [[ "$use_watch" == "1" ]]; then
+  # 手表模式不传 -e：zsign 用多个 -m 时按 App ID 给每个 bundle 配对描述
+  # 文件、各自生成 entitlements。手机端描述文件的 entitlements 与
+  # GoldAlert.entitlements 的内容一致（只有 get-task-allow=false），不丢东西。
+  watch_zsign=(-f -k "$p12" -p "$password" -m "$profile" -m "$watch_profile")
+  if [[ -f "$complication_profile" ]]; then
+    watch_zsign+=(-m "$complication_profile")
+  fi
+  watch_zsign+=(-o "$signed_ipa" "$unsigned")
+  zsign "${watch_zsign[@]}"
+else
+  zsign -f -k "$p12" -p "$password" -m "$profile" -e "$merged_ents" -o "$signed_ipa" "$unsigned"
+fi
 [[ -f "$signed_ipa" ]] || die "签名失败"
 
 echo "发布到 OTA 站（与其它 App 同一 index）..."
