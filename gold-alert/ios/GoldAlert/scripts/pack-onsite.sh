@@ -24,8 +24,9 @@ app_title="${OTA_TITLE:-提醒事项}"
 ota_slug="${OTA_SLUG:-goldalert}"
 
 # 手表端（可选，见 gold-alert/watchos/README.md）：GitHub Actions 编好的
-# 未签名 GoldAlertWatch.app 放到仓库 gold-alert/watchos/build/ 下，且
-# adhoc 目录里备好手表/复杂功能描述文件时，打包自动嵌入并多描述文件签名；
+# 未签名 GoldAlertWatch.app 位于仓库 gold-alert/watchos/build/ 下（打包前
+# 会自动尝试下载最新产物，见下方 fetch_watch_artifact），且 adhoc 目录里
+# 备好手表/复杂功能描述文件时，打包自动嵌入并多描述文件签名；
 # 缺任一样则完全按原流程只打手机端。
 watch_app="${WATCH_APP:-$repo_dir/gold-alert/watchos/build/GoldAlertWatch.app}"
 watch_profile="$adhoc_dir/goldalert-watch-adhoc.mobileprovision"
@@ -122,6 +123,69 @@ if [[ -z "$unsigned" || ! -f "$unsigned" ]]; then
 fi
 [[ -n "$unsigned" && -f "$unsigned" ]] || die "没有找到编译出的 ipa。看上面的 xtool 输出。"
 echo "未签名的包：$unsigned"
+
+# 手表端产物自动下载：从 GitHub Actions 拉最新一个 GoldAlertWatch-app
+# 产物（两层 zip：外层 artifact 里装 GoldAlertWatch-app.zip，内层才是 .app），
+# 解压覆盖到 watch_app 所在目录。下载需要 GitHub 登录（二选一，一次性设置）：
+# WSL 里 gh auth login，或把只读 token 放 ~/.github-token。
+# 没设置/下载失败都不中断打包：沿用本地已有产物（没有则只打手机端）。
+fetch_watch_artifact() {
+  local repo="rickrqi77/mt5AlertWebPage"
+  local dest_dir
+  dest_dir="$(dirname "$watch_app")"
+  local tmp aid=""
+  tmp="$(mktemp -d)"
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    aid="$(gh api "repos/$repo/actions/artifacts?per_page=20" \
+      --jq '.artifacts[] | select(.name=="GoldAlertWatch-app" and (.expired | not)) | .id' 2>/dev/null | head -1 || true)"
+    if [[ -n "$aid" ]]; then
+      gh api "repos/$repo/actions/artifacts/$aid/zip" > "$tmp/artifact.zip" 2>/dev/null || aid=""
+    fi
+  elif [[ -f "$HOME/.github-token" ]]; then
+    local tok
+    tok="$(tr -d '\r\n' < "$HOME/.github-token")"
+    aid="$(curl -sf -H "Authorization: Bearer $tok" -H "Accept: application/vnd.github+json" \
+      "https://api.github.com/repos/$repo/actions/artifacts?per_page=20" 2>/dev/null \
+      | python3 -c 'import json,sys
+try:
+    arts = json.load(sys.stdin).get("artifacts", [])
+    cand = [a for a in arts if a.get("name") == "GoldAlertWatch-app" and not a.get("expired")]
+    print(cand[0]["id"] if cand else "")
+except Exception:
+    print("")' || true)"
+    if [[ -n "$aid" ]]; then
+      curl -sfL -H "Authorization: Bearer $tok" -o "$tmp/artifact.zip" \
+        "https://api.github.com/repos/$repo/actions/artifacts/$aid/zip" 2>/dev/null || aid=""
+    fi
+  fi
+  if [[ -n "$aid" && -s "$tmp/artifact.zip" ]]; then
+    if python3 - "$tmp" <<'PY'
+import sys, zipfile, pathlib
+tmp = pathlib.Path(sys.argv[1])
+with zipfile.ZipFile(tmp / "artifact.zip") as z:
+    z.extractall(tmp / "outer")
+inners = list((tmp / "outer").rglob("*.zip"))
+if not inners:
+    sys.exit(1)
+with zipfile.ZipFile(inners[0]) as z:
+    z.extractall(tmp / "inner")
+if not (tmp / "inner" / "GoldAlertWatch.app").is_dir():
+    sys.exit(1)
+PY
+    then
+      rm -rf "$dest_dir/GoldAlertWatch.app"
+      mkdir -p "$dest_dir"
+      cp -R "$tmp/inner/GoldAlertWatch.app" "$dest_dir/"
+      echo "手表端产物已自动更新（artifact $aid）"
+    else
+      echo "手表端产物下载后解压失败，沿用本地已有产物"
+    fi
+  else
+    echo "手表端产物未自动下载（未登录 GitHub 或网络失败），沿用本地已有产物"
+  fi
+  rm -rf "$tmp"
+}
+fetch_watch_artifact || true
 
 use_watch=0
 if [[ -d "$watch_app" && -f "$watch_profile" ]]; then
