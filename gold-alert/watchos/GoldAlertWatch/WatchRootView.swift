@@ -116,7 +116,6 @@ struct WatchRootView: View {
             VStack(spacing: 4) {
                 header
                 priceBlock
-                updatedLine
                 stepPicker
                 brightnessSection
                 refreshPicker
@@ -155,16 +154,6 @@ struct WatchRootView: View {
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.65)
-    }
-
-    private var updatedLine: some View {
-        Group {
-            if let updated = model.lastUpdated {
-                Text("\(updated, style: .time) 更新")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-        }
     }
 
     private var stepPicker: some View {
@@ -216,12 +205,13 @@ struct WatchRootView: View {
         }
     }
 
-    /// 设定页最下方：实时价格刷新间隔（秒），五个一排。
+    /// 设定页最下方：实时价格刷新间隔（单位秒，标题不带单位），五个一排。
     private var refreshPicker: some View {
         VStack(spacing: 3) {
-            Text("刷新间隔（秒）")
+            Text("刷新间隔")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
             HStack(spacing: 4) {
                 ForEach(WatchModel.refreshChoices, id: \.self) { choice in
                     chip(
