@@ -2,7 +2,8 @@ import Foundation
 import WatchConnectivity
 
 /// 手表端状态与流程（ren 2026-11-15 确认的口径）：
-/// - 价格固定 Swiss：打开 app 时每 0.5 秒直连 Swissquote 取一次中间价；
+/// - 价格固定 Swiss：打开 app 时直连 Swissquote 取中间价，刷新间隔
+///   可在设定页选 0.5 / 1 / 3 / 5 / 10 秒（默认 0.5）；
 /// - 选择只有一项：间隔 [1, 2, 3, 4, 5, 10] 默认 5；每边档数固定 7
 ///   （上下各 7、共 15 个，与手机端一致，表上不再提供选择）；
 /// - 第一页（时钟页）的日期/时间/价格末两位共用一个亮度值（0–100，
@@ -28,6 +29,14 @@ final class WatchModel: NSObject, ObservableObject {
     private static let brightnessKey = "clockBrightness"
     var brightnessFraction: Double { brightness / 100 }
 
+    /// 实时价格刷新间隔（秒），设定页可选；循环每轮读当前值，改完
+    /// 下一轮即生效。实际周期 = 请求耗时 + 此间隔。
+    @Published var refreshInterval: Double = 0.5 {
+        didSet { UserDefaults.standard.set(refreshInterval, forKey: Self.refreshIntervalKey) }
+    }
+    private static let refreshIntervalKey = "refreshInterval"
+    static let refreshChoices: [Double] = [0.5, 1, 3, 5, 10]
+
     static let stepChoices: [Double] = [1, 2, 3, 4, 5, 10]
     /// 每边档数固定 7（ren 定：表上不提供选择，与手机一致）。
     static let perSide = 7
@@ -39,6 +48,10 @@ final class WatchModel: NSObject, ObservableObject {
         super.init()
         if let saved = UserDefaults.standard.object(forKey: Self.brightnessKey) as? Double {
             brightness = min(100, max(0, saved))
+        }
+        if let saved = UserDefaults.standard.object(forKey: Self.refreshIntervalKey) as? Double,
+           Self.refreshChoices.contains(saved) {
+            refreshInterval = saved
         }
         activateSession()
     }
@@ -57,7 +70,8 @@ final class WatchModel: NSObject, ObservableObject {
         refreshLoopTask = Task { [weak self] in
             await self?.refreshPrice()
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                let interval = self?.refreshInterval ?? 0.5
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
                 if Task.isCancelled { break }
                 await self?.refreshPrice()
             }
@@ -107,6 +121,10 @@ final class WatchModel: NSObject, ObservableObject {
 
     static func formatStep(_ step: Double) -> String {
         String(format: "%.0f", step)
+    }
+
+    static func formatInterval(_ value: Double) -> String {
+        value < 1 ? String(format: "%.1f", value) : String(format: "%.0f", value)
     }
 
     private func showNotice(_ text: String, isError: Bool) {
