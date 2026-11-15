@@ -47,10 +47,12 @@ Bundle ID：
 
 ## 每次出包
 
-1. GitHub 仓库 Actions 页运行 **Build Watch App**（改了 `gold-alert/watchos/`
-   下的文件 push 后也会自动跑），下载 artifact `GoldAlertWatch-app`。
-2. 解压，把 `GoldAlertWatch.app` 放到仓库的
-   `gold-alert/watchos/build/GoldAlertWatch.app`（WSL 里操作即可，不用提交）。
+1. **Build Watch App** 在改了 `gold-alert/watchos/` 下的文件 push 后会自动跑
+   （约 1 分半），产物 artifact 为 `GoldAlertWatch-app`，不用手动触发。
+2. 打包脚本 pack-onsite.sh 会在打包前自动下载最新产物到
+   `gold-alert/watchos/build/GoldAlertWatch.app`（需 WSL 里一次性登录
+   GitHub：`gh auth login`，或把只读 token 放 `~/.github-token`）；
+   自动下载没成时再手动下载 artifact、解压放到同一位置兜底（不用提交）。
 3. 照常跑 Build Menu 打包手机端。`pack-onsite.sh` 检测到手表 .app 和
    手表描述文件都在时，会自动嵌入并多描述文件签名；缺任一样则按原流程
    只打手机端，不受影响。
