@@ -7,8 +7,8 @@ import WatchConnectivity
 ///   （上下各 7、共 15 个，与手机端一致，表上不再提供选择）；
 /// - 第一页（时钟页）的日期/时间/价格末两位共用一个亮度值（0–100，
 ///   默认 100），在设定页用滑杆调、存 UserDefaults；
-/// - 执行留在手机上：点「设定并推送」只把 {step, perSide} 经
-///   WatchConnectivity 的 sendMessage 发给手机，手机用它现有的建网格逻辑
+/// - 执行留在手机上：在表上点间隔即把 {step, perSide} 经
+///   WatchConnectivity 的 sendMessage 发给手机（无确认按钮），手机用它现有的建网格逻辑
 ///   生成网格并 POST /api/alerts，再把结果回传到表上显示。token 不进手表。
 ///   手机不在附近/未连接时 sendMessage 达不到，表上明确报失败、不假装成功。
 @MainActor
@@ -72,6 +72,8 @@ final class WatchModel: NSObject, ObservableObject {
     // MARK: - 把设定发给手机执行
 
     func pushSelection() {
+        // 点间隔直接触发推送（无按钮）；推送进行中再点不重复发。
+        guard !pushing else { return }
         guard WCSession.isSupported() else {
             showNotice("这只手表不支持与手机通信", isError: true)
             return

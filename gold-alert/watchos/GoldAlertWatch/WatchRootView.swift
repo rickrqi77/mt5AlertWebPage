@@ -6,8 +6,9 @@ import SwiftUI
 /// 三处文字共用一个亮度值（设定页滑杆 0–100 调，颜色不变、只改明暗）。
 /// 第二页是间隔设定页：顶部中间连接绿点（XAU/USD、Swiss 字样已去），
 /// 完整价格、间隔选择、亮度滑杆（原每边档数的位置；每边档数固定 7
-/// 不再可选）、推送按钮。内容已按 42mm 一页高度收紧（ren 定不要滚动）：
-/// 无预览框、无分割线，间距与控件高度都压过。
+/// 不再可选）。没有推送按钮：点间隔即直接设定并推送；亮度滑杆松手
+/// （停下来）后自动跳回第一页看效果。内容已按 42mm 一页高度收紧
+/// （ren 定不要滚动）：无预览框、无分割线，间距与控件高度都压过。
 /// 价格固定 Swiss（打开时 0.5 秒刷新、抬腕激活立刻先刷一次）；
 /// 推送只是把选择发给手机执行，手机不在附近时会明确报失败。
 struct WatchRootView: View {
@@ -117,7 +118,6 @@ struct WatchRootView: View {
                 updatedLine
                 stepPicker
                 brightnessSection
-                pushButton
                 if !model.phoneReachable {
                     Text("推送需要手机在附近并保持连接")
                         .font(.caption2)
@@ -179,7 +179,9 @@ struct WatchRootView: View {
                         title: WatchModel.formatStep(choice),
                         selected: model.selectedStep == choice
                     ) {
+                        // 点间隔 = 直接设定并推送（ren 定不要按钮）。
                         model.selectedStep = choice
+                        model.pushSelection()
                     }
                 }
             }
@@ -187,40 +189,26 @@ struct WatchRootView: View {
     }
 
     /// 亮度滑杆（在原「每边档数」的位置）：调第一页日期/时间/价格
-    /// 末两位共用的亮度值。ren 定去掉时间日期预览框以适配一页高度，
-    /// 拖动后回第一页即可看到效果。
+    /// 末两位共用的亮度值（拖动中就实时生效于同一个状态值）。
+    /// ren 定：滑杆停下来（松手）后自动跳回第一页，直接看到效果；
+    /// 时间日期预览框已去掉以适配一页高度。
     private var brightnessSection: some View {
         VStack(spacing: 4) {
             Text("第一页亮度")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             HStack(spacing: 6) {
-                Slider(value: $model.brightness, in: 0...100, step: 1)
+                Slider(value: $model.brightness, in: 0...100, step: 1) { editing in
+                    if !editing {
+                        selectedPage = 0
+                    }
+                }
                 Text("\(Int(model.brightness))")
                     .font(.caption2)
                     .monospacedDigit()
                     .frame(width: 26)
             }
         }
-    }
-
-    private var pushButton: some View {
-        Button {
-            model.pushSelection()
-        } label: {
-            HStack(spacing: 4) {
-                if model.pushing {
-                    ProgressView()
-                }
-                Text(model.pushing ? "推送中" : "设定并推送")
-                    .font(.system(size: 15, weight: .bold))
-            }
-            .frame(maxWidth: .infinity, minHeight: 34)
-        }
-        .buttonStyle(.plain)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue))
-        .foregroundStyle(.white)
-        .disabled(model.pushing)
     }
 
     private func chip(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
