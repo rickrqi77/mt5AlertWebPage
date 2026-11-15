@@ -31,9 +31,11 @@ jobs:
         working-directory: gold-alert/watchos
         run: |
           mkdir -p GoldAlertWatch/Assets.xcassets/AppIcon.appiconset
-          base64 -d ../ios/GoldAlert/Icon.png.b64 > /tmp/watch-icon-raw.png
-          # 源图本身就是 1024x1024（已核对），直接拷过去当图标，不再用 sips 缩放：
-          # 2026-11-15 此步曾以 exit 64 失败，sips 是步内唯一的 macOS 专用命令，先移除排除嫌疑。
+          # base64 输入走 stdin 重定向（不要用位置参数传文件名）：
+          # 2026-11-15 此步连续以 exit 64（EX_USAGE）失败，去掉 sips 后仍失败，
+          # 步内只剩 macOS 自带 base64 的位置参数形式最可疑，stdin 形式 BSD/GNU 通用。
+          base64 -d < ../ios/GoldAlert/Icon.png.b64 > /tmp/watch-icon-raw.png
+          # 源图本身就是 1024x1024（已核对），直接拷过去当图标，不用 sips 缩放。
           cp /tmp/watch-icon-raw.png GoldAlertWatch/Assets.xcassets/AppIcon.appiconset/icon-1024.png
           cat > GoldAlertWatch/Assets.xcassets/Contents.json <<'JSON'
           {"info":{"author":"xcode","version":1}}
