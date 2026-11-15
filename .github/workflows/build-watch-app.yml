@@ -32,7 +32,9 @@ jobs:
         run: |
           mkdir -p GoldAlertWatch/Assets.xcassets/AppIcon.appiconset
           base64 -d ../ios/GoldAlert/Icon.png.b64 > /tmp/watch-icon-raw.png
-          sips -z 1024 1024 /tmp/watch-icon-raw.png --out GoldAlertWatch/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+          # 源图本身就是 1024x1024（已核对），直接拷过去当图标，不再用 sips 缩放：
+          # 2026-11-15 此步曾以 exit 64 失败，sips 是步内唯一的 macOS 专用命令，先移除排除嫌疑。
+          cp /tmp/watch-icon-raw.png GoldAlertWatch/Assets.xcassets/AppIcon.appiconset/icon-1024.png
           cat > GoldAlertWatch/Assets.xcassets/Contents.json <<'JSON'
           {"info":{"author":"xcode","version":1}}
           JSON
