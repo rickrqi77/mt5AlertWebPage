@@ -32,8 +32,6 @@ final class WatchModel: NSObject, ObservableObject {
     /// 每边档数固定 7（ren 定：表上不提供选择，与手机一致）。
     static let perSide = 7
 
-    var totalCount: Int { Self.perSide * 2 + 1 }
-
     private var refreshLoopTask: Task<Void, Never>?
     private var noticeTask: Task<Void, Never>?
 

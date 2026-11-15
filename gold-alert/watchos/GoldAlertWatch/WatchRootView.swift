@@ -117,7 +117,6 @@ struct WatchRootView: View {
                 Divider()
                 stepPicker
                 brightnessSection
-                summaryLine
                 pushButton
                 if !model.phoneReachable {
                     Text("推送需要手机在附近并保持连接")
@@ -136,10 +135,11 @@ struct WatchRootView: View {
         }
     }
 
-    /// 左上角只留连接状态点（绿=手机可达、灰=不可达）；ren 定 XAU/USD
-    /// 与 Swiss 字样都不要。
+    /// 顶部只留连接状态点（绿=手机可达、灰=不可达），横向居中；
+    /// ren 定 XAU/USD 与 Swiss 字样都不要。
     private var header: some View {
         HStack(spacing: 4) {
+            Spacer()
             Circle()
                 .fill(model.phoneReachable ? Color.green : Color.gray)
                 .frame(width: 7, height: 7)
@@ -226,12 +226,6 @@ struct WatchRootView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 6)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.15)))
-    }
-
-    private var summaryLine: some View {
-        Text("上下各 \(WatchModel.perSide) 档 · 共 \(model.totalCount) 个")
-            .font(.caption2)
-            .foregroundStyle(.secondary)
     }
 
     private var pushButton: some View {
