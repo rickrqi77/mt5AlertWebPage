@@ -3,10 +3,11 @@ import SwiftUI
 
 /// 表盘复杂功能（点按即打开手表端 App，WidgetKit 复杂功能的默认行为）：
 /// 圆形/矩形/行内/边角四种样式都支持，价格取 Swissquote 公共报价
-/// （与表端 app 同源、无需凭据）。
+/// （与表端 app 同源、无需凭据）。不显示品种名（ren 定）：圆形只显示
+/// 金价整数的末两位，矩形/行内只显示完整价格（无时间），边角显示整数价。
 /// 刷新节奏由系统的时间线预算决定（WidgetKit 每天约 40–75 次量级）：
 /// 下面 .after(15 分钟) 只是申请，系统可以推迟，所以表盘上是分钟级
-/// 快照价，2 秒/5 秒级刷新在表盘上做不到；点开 app 才是 1 秒一刷的实时价。
+/// 快照价，2 秒/5 秒级刷新在表盘上做不到；点开 app 才是 0.5 秒一刷的实时价。
 struct PriceEntry: TimelineEntry {
     let date: Date
     let price: Double
@@ -87,38 +88,27 @@ struct ComplicationView: View {
         entry.price > 0 ? String(format: "%.0f", entry.price) : "--"
     }
 
+    /// 金价整数部分的末两位（3880.x → "80"，与 app 第一页口径一致）。
+    private var priceLastTwo: String {
+        entry.price > 0 ? String(format: "%02d", Int(entry.price) % 100) : "--"
+    }
+
     var body: some View {
         switch family {
         case .accessoryCircular:
-            VStack(spacing: 0) {
-                Text("XAU")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Text(priceInt)
-                    .font(.system(size: 13, weight: .bold))
-                    .monospacedDigit()
-            }
+            Text(priceLastTwo)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .monospacedDigit()
         case .accessoryRectangular:
-            VStack(alignment: .leading, spacing: 1) {
-                Text("XAU/USD")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(priceFull)
-                    .font(.headline)
-                    .monospacedDigit()
-                Text(entry.date, style: .time)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            Text(priceFull)
+                .font(.system(size: 20, weight: .bold, design: .rounded))
+                .monospacedDigit()
         case .accessoryCorner:
             Text(priceInt)
                 .font(.headline)
                 .monospacedDigit()
-                .widgetLabel {
-                    Text("XAU/USD")
-                }
         default:
-            Text("XAU \(priceFull)")
+            Text(priceFull)
                 .monospacedDigit()
         }
     }

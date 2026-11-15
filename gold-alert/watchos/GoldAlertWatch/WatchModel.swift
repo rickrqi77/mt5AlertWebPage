@@ -3,8 +3,10 @@ import WatchConnectivity
 
 /// 手表端状态与流程（ren 2026-11-15 确认的口径）：
 /// - 价格固定 Swiss：打开 app 时每 0.5 秒直连 Swissquote 取一次中间价；
-/// - 选择只有两项：间隔 [1, 2, 3, 4, 5, 10] 默认 5、每边档数 [3, 5, 7]
-///   默认 7（上下各 7、共 15 个，与手机端一致）；
+/// - 选择只有一项：间隔 [1, 2, 3, 4, 5, 10] 默认 5；每边档数固定 7
+///   （上下各 7、共 15 个，与手机端一致，表上不再提供选择）；
+/// - 第一页（时钟页）的日期/时间/价格末两位共用一个亮度值（0–100，
+///   默认 100），在设定页用滑杆调、存 UserDefaults；
 /// - 执行留在手机上：点「设定并推送」只把 {step, perSide} 经
 ///   WatchConnectivity 的 sendMessage 发给手机，手机用它现有的建网格逻辑
 ///   生成网格并 POST /api/alerts，再把结果回传到表上显示。token 不进手表。
@@ -13,23 +15,33 @@ import WatchConnectivity
 final class WatchModel: NSObject, ObservableObject {
     @Published var swissPrice: Double = 0
     @Published var selectedStep: Double = 5
-    @Published var selectedPerSide: Int = 7
     @Published var phoneReachable = false
     @Published var pushing = false
     @Published var notice: String?
     @Published var noticeIsError = false
     @Published var lastUpdated: Date?
 
-    static let stepChoices: [Double] = [1, 2, 3, 4, 5, 10]
-    static let perSideChoices: [Int] = [3, 5, 7]
+    /// 第一页亮度（0–100），日期/时间/价格末两位统一用这一个值。
+    @Published var brightness: Double = 100 {
+        didSet { UserDefaults.standard.set(brightness, forKey: Self.brightnessKey) }
+    }
+    private static let brightnessKey = "clockBrightness"
+    var brightnessFraction: Double { brightness / 100 }
 
-    var totalCount: Int { selectedPerSide * 2 + 1 }
+    static let stepChoices: [Double] = [1, 2, 3, 4, 5, 10]
+    /// 每边档数固定 7（ren 定：表上不提供选择，与手机一致）。
+    static let perSide = 7
+
+    var totalCount: Int { Self.perSide * 2 + 1 }
 
     private var refreshLoopTask: Task<Void, Never>?
     private var noticeTask: Task<Void, Never>?
 
     override init() {
         super.init()
+        if let saved = UserDefaults.standard.object(forKey: Self.brightnessKey) as? Double {
+            brightness = min(100, max(0, saved))
+        }
         activateSession()
     }
 
@@ -76,7 +88,7 @@ final class WatchModel: NSObject, ObservableObject {
         let message: [String: Any] = [
             "command": "setGrid",
             "step": selectedStep,
-            "perSide": selectedPerSide,
+            "perSide": Self.perSide,
         ]
         session.sendMessage(message, replyHandler: { [weak self] reply in
             let ok = reply["ok"] as? Bool ?? false
