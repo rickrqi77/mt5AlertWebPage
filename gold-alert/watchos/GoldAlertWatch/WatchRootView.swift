@@ -4,9 +4,10 @@ import SwiftUI
 /// 第一页是时钟页——日期在上、时间在下，居中显示，尺寸适配表盘；
 /// 底部中间只显示金价整数的末两位（如 4019 显示 19），字体小。
 /// 三处文字共用一个亮度值（设定页滑杆 0–100 调，颜色不变、只改明暗）。
-/// 第二页是间隔设定页：左上角只留连接绿点（XAU/USD、Swiss 字样已去），
-/// 完整价格、间隔选择、第一页小预览+亮度滑杆（原每边档数的位置；
-/// 每边档数固定 7 不再可选）、推送按钮。
+/// 第二页是间隔设定页：顶部中间连接绿点（XAU/USD、Swiss 字样已去），
+/// 完整价格、间隔选择、亮度滑杆（原每边档数的位置；每边档数固定 7
+/// 不再可选）、推送按钮。内容已按 42mm 一页高度收紧（ren 定不要滚动）：
+/// 无预览框、无分割线，间距与控件高度都压过。
 /// 价格固定 Swiss（打开时 0.5 秒刷新、抬腕激活立刻先刷一次）；
 /// 推送只是把选择发给手机执行，手机不在附近时会明确报失败。
 struct WatchRootView: View {
@@ -110,11 +111,10 @@ struct WatchRootView: View {
 
     private var settingsPage: some View {
         ScrollView {
-            VStack(spacing: 7) {
+            VStack(spacing: 5) {
                 header
                 priceBlock
                 updatedLine
-                Divider()
                 stepPicker
                 brightnessSection
                 pushButton
@@ -149,7 +149,7 @@ struct WatchRootView: View {
 
     private var priceBlock: some View {
         Text(model.swissPrice > 0 ? String(format: "%.2f", model.swissPrice) : "--")
-            .font(.system(size: 29, weight: .bold, design: .rounded))
+            .font(.system(size: 27, weight: .bold, design: .rounded))
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.65)
@@ -166,13 +166,13 @@ struct WatchRootView: View {
     }
 
     private var stepPicker: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 4) {
             Text("间隔")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             LazyVGrid(
                 columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 5
+                spacing: 4
             ) {
                 ForEach(WatchModel.stepChoices, id: \.self) { choice in
                     chip(
@@ -186,15 +186,14 @@ struct WatchRootView: View {
         }
     }
 
-    /// 原「每边档数」的位置改放第一页的小预览 + 亮度滑杆（ren 定）：
-    /// 拖动滑杆时预览里的日期/时间/价格末两位同步变亮变暗，
-    /// 第一页本体用的是同一个亮度值。
+    /// 亮度滑杆（在原「每边档数」的位置）：调第一页日期/时间/价格
+    /// 末两位共用的亮度值。ren 定去掉时间日期预览框以适配一页高度，
+    /// 拖动后回第一页即可看到效果。
     private var brightnessSection: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 4) {
             Text("第一页亮度")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            clockPreview
             HStack(spacing: 6) {
                 Slider(value: $model.brightness, in: 0...100, step: 1)
                 Text("\(Int(model.brightness))")
@@ -203,29 +202,6 @@ struct WatchRootView: View {
                     .frame(width: 26)
             }
         }
-    }
-
-    /// 第一页的缩小预览（日期/时间/价格末两位），亮度与第一页同步。
-    private var clockPreview: some View {
-        VStack(spacing: 1) {
-            Text(Self.dateFormatter.string(from: Date()))
-                .font(.system(size: 10, weight: .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .opacity(model.brightnessFraction)
-            Text(Self.timeFormatter.string(from: Date()))
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .opacity(model.brightnessFraction)
-            Text(priceDigits)
-                .font(.system(size: 9, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .opacity(model.brightnessFraction)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 6)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.gray.opacity(0.15)))
     }
 
     private var pushButton: some View {
@@ -239,7 +215,7 @@ struct WatchRootView: View {
                 Text(model.pushing ? "推送中" : "设定并推送")
                     .font(.system(size: 15, weight: .bold))
             }
-            .frame(maxWidth: .infinity, minHeight: 36)
+            .frame(maxWidth: .infinity, minHeight: 34)
         }
         .buttonStyle(.plain)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue))
@@ -252,7 +228,7 @@ struct WatchRootView: View {
             Text(title)
                 .font(.system(size: 16, weight: .semibold))
                 .monospacedDigit()
-                .frame(maxWidth: .infinity, minHeight: 30)
+                .frame(maxWidth: .infinity, minHeight: 28)
         }
         .buttonStyle(.plain)
         .background(
