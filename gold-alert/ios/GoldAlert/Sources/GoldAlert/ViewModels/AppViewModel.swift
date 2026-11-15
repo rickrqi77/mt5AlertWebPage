@@ -68,11 +68,12 @@ final class AppViewModel: ObservableObject {
         if let s = LocalCache.loadStep() { step = s }
         if let p = LocalCache.loadPaused() { alertsPaused = p }
         if let o = LocalCache.loadOnline() { eaOnline = o }
-        // 手表端：激活 WatchConnectivity，并把已有凭据同步给手表
-        // （手表收到后存自己的钥匙串，之后可独立取价、在表上推送间隔设定）。
+        // 手表端：激活 WatchConnectivity 并注册手表设定指令的处理者
+        // （手表只发 {间隔, 每边档数}，建网格与推送仍在本机完成，token 不出手表）。
         WatchBridge.shared.activate()
-        if !token.isEmpty {
-            WatchBridge.shared.syncCredentials(baseURL: baseURL, token: token)
+        WatchBridge.shared.onSetGridCommand = { [weak self] step, perSide in
+            await self?.handleWatchSetGrid(step: step, perSide: perSide)
+                ?? (false, "手机端还没准备好")
         }
     }
 
@@ -105,7 +106,6 @@ final class AppViewModel: ObservableObject {
             KeychainStore.saveBaseURL(base)
             tokenInput = ""
             isUnlocked = true
-            WatchBridge.shared.syncCredentials(baseURL: base, token: t)
             startLoops()
             showToast("已解锁", error: false)
         } catch {
@@ -117,7 +117,6 @@ final class AppViewModel: ObservableObject {
     func logout() {
         stopLoops()
         KeychainStore.clearToken()
-        WatchBridge.shared.syncCredentials(baseURL: "", token: "")
         token = ""
         tokenInput = ""
         alerts = []
@@ -319,21 +318,85 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    /// 手表端发来的设定指令（ren 2026-11-15 定：执行留在手机上）：
+    /// 与 applyStep 同一套流程——定价用画面现价、先把新网格刷到画面上、
+    /// 等一个 3 秒周期再 POST——区别只是间隔与每边档数来自手表，
+    /// 且结果要回传给手表显示。每边档数钳在 1...7（共最多 15 行，
+    /// 与 maxAlerts 一致）；手表只会发 3/5/7。
+    func handleWatchSetGrid(step newStep: Double, perSide: Int) async -> (Bool, String) {
+        guard isUnlocked, !token.isEmpty else {
+            return (false, "手机端未解锁，先在手机上打开提醒事项")
+        }
+        let side = min(max(perSide, 1), 7)
+        let previousStep = step
+        let wasDirty = alertsDirty
+        step = newStep
+        persistState()
+
+        busy = true
+        defer { busy = false }
+        alertsDirty = true
+
+        var price = displayPrice
+        if price <= 0 {
+            if priceSource == .ea {
+                await refreshCloudState()
+            } else {
+                await refreshSwissPrice()
+            }
+            price = displayPrice
+        }
+        guard price > 0 else {
+            alertsDirty = wasDirty
+            step = previousStep
+            persistState()
+            return (false, "手机上还没有价格")
+        }
+
+        let grid = Self.buildGrid(centerPrice: price, step: newStep, perSide: side)
+        alerts = grid
+        persistState()
+
+        try? await Task.sleep(nanoseconds: UInt64(Self.cloudPollSeconds * 1_000_000_000))
+
+        do {
+            let data = try await CloudflareClient.shared.saveAlerts(
+                baseURL: baseURL,
+                token: token,
+                alerts: grid,
+                step: newStep
+            )
+            let echoed = (data.alerts ?? []).map { $0.asItem() }
+            if !echoed.isEmpty, Self.alertsFingerprint(echoed) != Self.alertsFingerprint(grid) {
+                alerts = echoed
+            }
+            alertsDirty = false
+            persistState()
+            flashDone()
+            return (true, "已设定 · 间隔 \(String(format: "%g", newStep)) · 共 \(grid.count) 个")
+        } catch {
+            alertsDirty = true
+            persistState()
+            return (false, error.localizedDescription)
+        }
+    }
+
     /// 按间隔逻辑本地生成网格（ren 定版，严格按此顺序）：
     /// 1. 起点 = 当前价的整数部分（Int 直接截断小数，不四舍五入；
     ///    例：4013.80 的起点是 4013，不是 4014。服务器 /api/alerts/auto 同样用 4013，
     ///    旧版用 rounded() 四舍五入是小数 ≥.5 时整格错位 1 的根源）；
-    /// 2. 从起点往小设 7 个：起点 − 间隔×1...7；
-    /// 3. 从起点往大设 7 个：起点 + 间隔×1...7；
+    /// 2. 从起点往小设 perSide 个：起点 − 间隔×1...perSide；
+    /// 3. 从起点往大设 perSide 个：起点 + 间隔×1...perSide；
+    ///    （perSide 默认 7；手表端可选 3/5/7，手机端沿用 7。）
     /// 4. 全部设完后按价格升序排序。
     /// 起点关闭（enabled=false），其余全部触发（enabled=true），均未触发过。
-    private static func buildGrid(centerPrice: Double, step: Double) -> [AlertItem] {
+    private static func buildGrid(centerPrice: Double, step: Double, perSide: Int = 7) -> [AlertItem] {
         let start = Double(Int(centerPrice))
         var points: [(price: Double, isStart: Bool)] = [(start, true)]
-        for i in 1...7 {
+        for i in 1...perSide {
             points.append((start - step * Double(i), false))
         }
-        for i in 1...7 {
+        for i in 1...perSide {
             points.append((start + step * Double(i), false))
         }
         return points

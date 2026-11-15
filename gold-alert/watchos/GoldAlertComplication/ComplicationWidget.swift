@@ -3,7 +3,10 @@ import SwiftUI
 
 /// 表盘复杂功能（点按即打开手表端 App，WidgetKit 复杂功能的默认行为）：
 /// 圆形/矩形/行内/边角四种样式都支持，价格取 Swissquote 公共报价
-/// （无需凭据），时间线每 15 分钟刷新一次。
+/// （与表端 app 同源、无需凭据）。
+/// 刷新节奏由系统的时间线预算决定（WidgetKit 每天约 40–75 次量级）：
+/// 下面 .after(15 分钟) 只是申请，系统可以推迟，所以表盘上是分钟级
+/// 快照价，2 秒/5 秒级刷新在表盘上做不到；点开 app 才是 2 秒一刷的实时价。
 struct PriceEntry: TimelineEntry {
     let date: Date
     let price: Double

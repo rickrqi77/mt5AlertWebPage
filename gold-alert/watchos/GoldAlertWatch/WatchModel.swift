@@ -1,97 +1,55 @@
 import Foundation
 import WatchConnectivity
 
-/// 手表端状态与流程：
-/// - 价格：优先 EA 推送到服务器的价格（/api/status），取不到时用 Swissquote
-///   公共报价兜底显示（凭据还没同步过来时也能看价）；
-/// - 间隔：与手机端同一组选项 [1, 2, 3, 4, 5, 10]，首次打开默认跟随服务器
-///   当前间隔；点「设定并推送」后 POST /api/alerts/auto，服务器按现价生成
-///   网格（上下各 7 个、共 15 个，与手机端一致）并保存，EA 下个同步周期采用；
-/// - 凭据：iPhone 端解锁后经 WatchConnectivity 的 applicationContext 同步
-///   {baseURL, token}，收到后存手表自己的钥匙串；手机端退出登录会同步清空。
+/// 手表端状态与流程（ren 2026-11-15 确认的口径）：
+/// - 价格固定 Swiss：打开 app 时每 2 秒直连 Swissquote 取一次中间价；
+/// - 选择只有两项：间隔 [1, 2, 3, 4, 5, 10] 默认 5、每边档数 [3, 5, 7]
+///   默认 7（上下各 7、共 15 个，与手机端一致）；
+/// - 执行留在手机上：点「设定并推送」只把 {step, perSide} 经
+///   WatchConnectivity 的 sendMessage 发给手机，手机用它现有的建网格逻辑
+///   生成网格并 POST /api/alerts，再把结果回传到表上显示。token 不进手表。
+///   手机不在附近/未连接时 sendMessage 达不到，表上明确报失败、不假装成功。
 @MainActor
 final class WatchModel: NSObject, ObservableObject {
-    @Published var eaPrice: Double = 0
     @Published var swissPrice: Double = 0
-    @Published var eaOnline = false
-    @Published var serverStep: Double = 0
-    @Published var armedCount = 0
-    @Published var totalCount = 0
     @Published var selectedStep: Double = 5
-    @Published var hasCredentials = false
-    @Published var busy = false
+    @Published var selectedPerSide: Int = 7
+    @Published var phoneReachable = false
     @Published var pushing = false
     @Published var notice: String?
     @Published var noticeIsError = false
     @Published var lastUpdated: Date?
 
     static let stepChoices: [Double] = [1, 2, 3, 4, 5, 10]
+    static let perSideChoices: [Int] = [3, 5, 7]
 
-    private var baseURL = WatchKeychain.readBaseURL()
-    private var token = WatchKeychain.readToken()
-    private var didInitStepFromServer = false
+    var totalCount: Int { selectedPerSide * 2 + 1 }
+
     private var refreshLoopTask: Task<Void, Never>?
     private var noticeTask: Task<Void, Never>?
 
-    var displayPrice: Double { eaPrice > 0 ? eaPrice : swissPrice }
-    var priceSourceText: String {
-        if eaPrice > 0 { return "EA" }
-        if swissPrice > 0 { return "Swiss" }
-        return ""
-    }
-
     override init() {
         super.init()
-        hasCredentials = !token.isEmpty
         activateSession()
     }
 
-    // MARK: - 价格刷新
+    // MARK: - 价格（固定 Swiss，app 打开时 2 秒一刷）
 
-    func refresh() async {
-        guard !busy else { return }
-        busy = true
-        defer { busy = false }
-
+    func refreshPrice() async {
         if let price = try? await WatchAPI.shared.fetchSwissPrice() {
             swissPrice = price
-            if eaPrice <= 0 { lastUpdated = Date() }
-        }
-
-        guard hasCredentials else { return }
-        do {
-            let status = try await WatchAPI.shared.getStatus(baseURL: baseURL, token: token)
-            if let p = status.price, p > 0 { eaPrice = p }
-            eaOnline = status.ea_online ?? false
-            if let s = status.step, s > 0 {
-                serverStep = s
-                if !didInitStepFromServer {
-                    selectedStep = s
-                    didInitStepFromServer = true
-                }
-            }
-            if let list = status.alerts {
-                totalCount = list.count
-                armedCount = list.filter { $0.enabled?.boolValue ?? true }.count
-            }
             lastUpdated = Date()
-        } catch let error as WatchAPIError {
-            if case .unauthorized = error {
-                showNotice(error.localizedDescription, isError: true)
-            }
-        } catch {
-            // 网络抖动时静默：画面保留上次价格，下个周期再刷。
         }
     }
 
     func startAutoRefresh() {
         refreshLoopTask?.cancel()
         refreshLoopTask = Task { [weak self] in
-            await self?.refresh()
+            await self?.refreshPrice()
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 20_000_000_000)
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
                 if Task.isCancelled { break }
-                await self?.refresh()
+                await self?.refreshPrice()
             }
         }
     }
@@ -101,36 +59,38 @@ final class WatchModel: NSObject, ObservableObject {
         refreshLoopTask = nil
     }
 
-    // MARK: - 推送间隔设定到 EA
+    // MARK: - 把设定发给手机执行
 
-    func pushSelectedStep() async {
-        guard hasCredentials else {
-            showNotice("先在 iPhone 上打开提醒事项解锁一次，凭据会自动同步到手表", isError: true)
+    func pushSelection() {
+        guard WCSession.isSupported() else {
+            showNotice("这只手表不支持与手机通信", isError: true)
             return
         }
-        let price = displayPrice
-        guard price > 0 else {
-            showNotice("还没有价格，稍后再试", isError: true)
+        let session = WCSession.default
+        phoneReachable = session.isReachable
+        guard session.activationState == .activated, session.isReachable else {
+            showNotice("手机不在附近或未连接，设定发不出去", isError: true)
             return
         }
         pushing = true
-        defer { pushing = false }
-        do {
-            _ = try await WatchAPI.shared.autoGenerate(
-                baseURL: baseURL,
-                token: token,
-                step: selectedStep,
-                price: price
-            )
-            serverStep = selectedStep
-            didInitStepFromServer = true
-            showNotice("已推送 · 间隔 \(Self.formatStep(selectedStep)) · EA 数秒内生效", isError: false)
-            // 等 EA 一个同步周期后再刷新，让“已设定个数”显示新网格。
-            try? await Task.sleep(nanoseconds: 3_500_000_000)
-            await refresh()
-        } catch {
-            showNotice(error.localizedDescription, isError: true)
-        }
+        let message: [String: Any] = [
+            "command": "setGrid",
+            "step": selectedStep,
+            "perSide": selectedPerSide,
+        ]
+        session.sendMessage(message, replyHandler: { [weak self] reply in
+            let ok = reply["ok"] as? Bool ?? false
+            let text = reply["message"] as? String ?? (ok ? "已设定" : "推送失败")
+            Task { @MainActor in
+                self?.pushing = false
+                self?.showNotice(text, isError: !ok)
+            }
+        }, errorHandler: { [weak self] error in
+            Task { @MainActor in
+                self?.pushing = false
+                self?.showNotice("发送失败：\(error.localizedDescription)", isError: true)
+            }
+        })
     }
 
     static func formatStep(_ step: Double) -> String {
@@ -142,36 +102,19 @@ final class WatchModel: NSObject, ObservableObject {
         noticeIsError = isError
         noticeTask?.cancel()
         noticeTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 4_500_000_000)
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
             if Task.isCancelled { return }
             self?.notice = nil
         }
     }
 
-    // MARK: - WatchConnectivity（接收 iPhone 同步的凭据）
+    // MARK: - WatchConnectivity
 
     private func activateSession() {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         session.delegate = self
         session.activate()
-    }
-
-    private func applyCredentials(baseURL newBase: String, token newToken: String) {
-        if newToken.isEmpty {
-            WatchKeychain.clearToken()
-            token = ""
-            hasCredentials = false
-            return
-        }
-        token = newToken
-        WatchKeychain.saveToken(newToken)
-        if !newBase.isEmpty {
-            baseURL = newBase
-            WatchKeychain.saveBaseURL(newBase)
-        }
-        hasCredentials = true
-        Task { await refresh() }
     }
 }
 
@@ -181,18 +124,16 @@ extension WatchModel: WCSessionDelegate {
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
-        // 激活完成后，若 iPhone 先前已写入 applicationContext，
-        // 系统会紧接着回调 didReceiveApplicationContext。
+        let reachable = session.isReachable
+        Task { @MainActor in
+            self.phoneReachable = reachable
+        }
     }
 
-    nonisolated func session(
-        _ session: WCSession,
-        didReceiveApplicationContext applicationContext: [String: Any]
-    ) {
-        let newToken = applicationContext["token"] as? String ?? ""
-        let newBase = applicationContext["baseURL"] as? String ?? ""
+    nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
+        let reachable = session.isReachable
         Task { @MainActor in
-            self.applyCredentials(baseURL: newBase, token: newToken)
+            self.phoneReachable = reachable
         }
     }
 }

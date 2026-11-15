@@ -1,8 +1,10 @@
 import SwiftUI
 
 /// 手表端主界面，按 Apple Watch Series 12 的 42mm 表壳（187×223pt）优先排版：
-/// 价格大字一行放得下、间隔选项 3 列小格、推送按钮整行；内容约两屏高，
-/// 表冠滚动看完。46mm 上同一套布局自动放宽，不另做一套。
+/// 价格大字一行、间隔 3 列小格、每边档数一行 3 格、推送按钮整行；
+/// 内容约两屏高，表冠滚动看完。46mm 上同一套布局自动放宽。
+/// 价格固定 Swiss（打开时 2 秒刷新）；推送只是把选择发给手机执行，
+/// 手机不在附近时按钮点了会明确报失败。
 struct WatchRootView: View {
     @EnvironmentObject private var model: WatchModel
 
@@ -11,12 +13,14 @@ struct WatchRootView: View {
             VStack(spacing: 7) {
                 header
                 priceBlock
-                statusLine
+                updatedLine
                 Divider()
                 stepPicker
+                perSidePicker
+                summaryLine
                 pushButton
-                if !model.hasCredentials {
-                    Text("先在 iPhone 上打开提醒事项解锁一次，凭据会自动同步到手表。现在显示的是 Swiss 报价。")
+                if !model.phoneReachable {
+                    Text("推送需要手机在附近并保持连接")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -27,7 +31,6 @@ struct WatchRootView: View {
                         .foregroundStyle(model.noticeIsError ? .red : .green)
                         .multilineTextAlignment(.center)
                 }
-                refreshButton
             }
             .padding(.horizontal, 4)
         }
@@ -38,35 +41,28 @@ struct WatchRootView: View {
     private var header: some View {
         HStack(spacing: 4) {
             Circle()
-                .fill(model.eaOnline ? Color.green : Color.red)
+                .fill(model.phoneReachable ? Color.green : Color.gray)
                 .frame(width: 7, height: 7)
             Text("XAU/USD")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             Spacer()
-            if !model.priceSourceText.isEmpty {
-                Text(model.priceSourceText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            Text("Swiss")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
     }
 
     private var priceBlock: some View {
-        Text(model.displayPrice > 0 ? String(format: "%.2f", model.displayPrice) : "--")
+        Text(model.swissPrice > 0 ? String(format: "%.2f", model.swissPrice) : "--")
             .font(.system(size: 29, weight: .bold, design: .rounded))
             .monospacedDigit()
             .lineLimit(1)
             .minimumScaleFactor(0.65)
     }
 
-    private var statusLine: some View {
-        VStack(spacing: 1) {
-            if model.serverStep > 0 {
-                Text("现间隔 \(WatchModel.formatStep(model.serverStep)) · 已开 \(model.armedCount)/\(model.totalCount) 个")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+    private var updatedLine: some View {
+        Group {
             if let updated = model.lastUpdated {
                 Text("\(updated, style: .time) 更新")
                     .font(.caption2)
@@ -77,7 +73,7 @@ struct WatchRootView: View {
 
     private var stepPicker: some View {
         VStack(spacing: 5) {
-            Text("间隔设定（上下各 7 个）")
+            Text("间隔")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             LazyVGrid(
@@ -85,28 +81,44 @@ struct WatchRootView: View {
                 spacing: 5
             ) {
                 ForEach(WatchModel.stepChoices, id: \.self) { choice in
-                    Button {
+                    chip(
+                        title: WatchModel.formatStep(choice),
+                        selected: model.selectedStep == choice
+                    ) {
                         model.selectedStep = choice
-                    } label: {
-                        Text(WatchModel.formatStep(choice))
-                            .font(.system(size: 16, weight: .semibold))
-                            .monospacedDigit()
-                            .frame(maxWidth: .infinity, minHeight: 30)
                     }
-                    .buttonStyle(.plain)
-                    .background(
-                        RoundedRectangle(cornerRadius: 9)
-                            .fill(model.selectedStep == choice ? Color.blue : Color.gray.opacity(0.3))
-                    )
-                    .foregroundStyle(model.selectedStep == choice ? .white : .primary)
                 }
             }
         }
     }
 
+    private var perSidePicker: some View {
+        VStack(spacing: 5) {
+            Text("每边档数")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            HStack(spacing: 5) {
+                ForEach(WatchModel.perSideChoices, id: \.self) { choice in
+                    chip(
+                        title: "\(choice)",
+                        selected: model.selectedPerSide == choice
+                    ) {
+                        model.selectedPerSide = choice
+                    }
+                }
+            }
+        }
+    }
+
+    private var summaryLine: some View {
+        Text("上下各 \(model.selectedPerSide) 档 · 共 \(model.totalCount) 个")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+    }
+
     private var pushButton: some View {
         Button {
-            Task { await model.pushSelectedStep() }
+            model.pushSelection()
         } label: {
             HStack(spacing: 4) {
                 if model.pushing {
@@ -120,17 +132,21 @@ struct WatchRootView: View {
         .buttonStyle(.plain)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color.blue))
         .foregroundStyle(.white)
-        .disabled(model.pushing || !model.hasCredentials || model.displayPrice <= 0)
-        .opacity(model.hasCredentials ? 1 : 0.45)
+        .disabled(model.pushing)
     }
 
-    private var refreshButton: some View {
-        Button {
-            Task { await model.refresh() }
-        } label: {
-            Label("刷新", systemImage: "arrow.clockwise")
-                .font(.caption)
+    private func chip(title: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold))
+                .monospacedDigit()
+                .frame(maxWidth: .infinity, minHeight: 30)
         }
-        .disabled(model.busy)
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 9)
+                .fill(selected ? Color.blue : Color.gray.opacity(0.3))
+        )
+        .foregroundStyle(selected ? .white : .primary)
     }
 }
