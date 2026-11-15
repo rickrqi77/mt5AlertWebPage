@@ -2,7 +2,7 @@ import Foundation
 import WatchConnectivity
 
 /// 手表端状态与流程（ren 2026-11-15 确认的口径）：
-/// - 价格固定 Swiss：打开 app 时每 1 秒直连 Swissquote 取一次中间价；
+/// - 价格固定 Swiss：打开 app 时每 0.8 秒直连 Swissquote 取一次中间价；
 /// - 选择只有两项：间隔 [1, 2, 3, 4, 5, 10] 默认 5、每边档数 [3, 5, 7]
 ///   默认 7（上下各 7、共 15 个，与手机端一致）；
 /// - 执行留在手机上：点「设定并推送」只把 {step, perSide} 经
@@ -33,7 +33,7 @@ final class WatchModel: NSObject, ObservableObject {
         activateSession()
     }
 
-    // MARK: - 价格（固定 Swiss，app 打开时 1 秒一刷）
+    // MARK: - 价格（固定 Swiss，app 打开时 0.8 秒一刷）
 
     func refreshPrice() async {
         if let price = try? await WatchAPI.shared.fetchSwissPrice() {
@@ -47,7 +47,7 @@ final class WatchModel: NSObject, ObservableObject {
         refreshLoopTask = Task { [weak self] in
             await self?.refreshPrice()
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                try? await Task.sleep(nanoseconds: 800_000_000)
                 if Task.isCancelled { break }
                 await self?.refreshPrice()
             }
