@@ -3,10 +3,11 @@ import SwiftUI
 /// 手表端主界面，按 Apple Watch Series 12 的 42mm 表壳（187×223pt）优先排版：
 /// 价格大字一行、间隔 3 列小格、每边档数一行 3 格、推送按钮整行；
 /// 内容约两屏高，表冠滚动看完。46mm 上同一套布局自动放宽。
-/// 价格固定 Swiss（打开时 1 秒刷新）；推送只是把选择发给手机执行，
+/// 价格固定 Swiss（打开时 1 秒刷新、抬腕激活立刻先刷一次）；推送只是把选择发给手机执行，
 /// 手机不在附近时按钮点了会明确报失败。
 struct WatchRootView: View {
     @EnvironmentObject private var model: WatchModel
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ScrollView {
@@ -36,6 +37,15 @@ struct WatchRootView: View {
         }
         .onAppear { model.startAutoRefresh() }
         .onDisappear { model.stopAutoRefresh() }
+        // 抬腕亮屏（app 回到激活态）时立刻先取一次价，不等循环节拍；
+        // 放下手腕变非激活就停循环，省电也避免挂起期间的空转。
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                model.startAutoRefresh()
+            } else {
+                model.stopAutoRefresh()
+            }
+        }
     }
 
     private var header: some View {
