@@ -3,7 +3,7 @@ import SwiftUI
 /// 手表端主界面，按 Apple Watch Series 12 的 42mm 表壳（187×223pt）优先排版：
 /// 价格大字一行、间隔 3 列小格、每边档数一行 3 格、推送按钮整行；
 /// 内容约两屏高，表冠滚动看完。46mm 上同一套布局自动放宽。
-/// 价格固定 Swiss（打开时 2 秒刷新）；推送只是把选择发给手机执行，
+/// 价格固定 Swiss（打开时 1 秒刷新）；推送只是把选择发给手机执行，
 /// 手机不在附近时按钮点了会明确报失败。
 struct WatchRootView: View {
     @EnvironmentObject private var model: WatchModel

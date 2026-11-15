@@ -6,7 +6,7 @@ import SwiftUI
 /// （与表端 app 同源、无需凭据）。
 /// 刷新节奏由系统的时间线预算决定（WidgetKit 每天约 40–75 次量级）：
 /// 下面 .after(15 分钟) 只是申请，系统可以推迟，所以表盘上是分钟级
-/// 快照价，2 秒/5 秒级刷新在表盘上做不到；点开 app 才是 2 秒一刷的实时价。
+/// 快照价，2 秒/5 秒级刷新在表盘上做不到；点开 app 才是 1 秒一刷的实时价。
 struct PriceEntry: TimelineEntry {
     let date: Date
     let price: Double
