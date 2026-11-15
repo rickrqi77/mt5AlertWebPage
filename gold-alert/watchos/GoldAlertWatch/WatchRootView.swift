@@ -194,9 +194,12 @@ struct WatchRootView: View {
     /// 时间日期预览框已去掉以适配一页高度。
     private var brightnessSection: some View {
         VStack(spacing: 4) {
+            // 这几个字本身也吃同一个亮度值（ren 定）：拖滑杆时看字的
+            // 明暗就能当场确认效果，不必先跳回第一页。
             Text("第一页亮度")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .opacity(model.brightnessFraction)
             HStack(spacing: 6) {
                 Slider(value: $model.brightness, in: 0...100, step: 1) { editing in
                     if !editing {
