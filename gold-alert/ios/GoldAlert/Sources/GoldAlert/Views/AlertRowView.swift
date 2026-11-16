@@ -17,10 +17,17 @@ struct AlertRowView: View {
     // 逐行显示的正是旧 step3 网格在相同行号上的旧值），靠 onAppear/task/onChange
     // 同步总有行漏掉。改为直接绑定模型值：模型是什么价，画面就显示什么价，
     // 没有第二份状态可以残留。
-    /// 滑动调价进度：本次拖动开始时的价格与已应用的 0.5 步数（手势驱动，
-    /// 只记进度不记价格本身，价格始终以模型为准）。
-    @State private var swipeStartPrice: Double?
-    @State private var swipeStepsApplied = 0
+    /// 滑动调价进度：本次拖动的起始价、已应用步数、是否已判定为滚动
+    /// （出局）。放在普通类里而不是 @State：判定过程中改它不能触发
+    /// 视图重绘——构建 17 实测，斜向滚动时手势 onChanged 里写 @State
+    /// 会把列表的滚动手势中途掐掉（滚动时灵时不灵的根源）。
+    @State private var swipe = SwipeTracker()
+
+    private final class SwipeTracker {
+        var startPrice: Double?
+        var stepsApplied = 0
+        var disqualified = false
+    }
 
     /// 价格字段直接读写模型：读 = item.priceText，写 = 用户编辑时回传模型。
     private var priceBinding: Binding<String> {
@@ -89,40 +96,49 @@ struct AlertRowView: View {
                     .frame(height: 1)
             }
         }
-        // 滑动调价：在整行任意位置按住后左右滑动调价（ren 2026-10-28 改定
-        // 整行可滑；构建 18 起改为按住起手，见 priceSwipeGesture 说明）。
-        // simultaneous 不挡点按：价格仍可点开编辑、右侧按钮仍可点。
+        // 滑动调价：在整行任意位置直接左右滑动调价（ren 2026-10-28 改定
+        // 整行可滑；与滚动的共存靠手势内的严格横向门槛，见
+        // priceSwipeGesture 说明）。simultaneous 不挡点按：价格仍可
+        // 点开编辑、右侧按钮仍可点。
         .simultaneousGesture(priceSwipeGesture)
     }
 
-    /// 在整行任意位置滑动调价（ren 2026-10-28 定版：横向每滑约 28pt 调整
-    /// 0.5——右滑加、左滑减，拖动中即时写回模型，价格与本行盈亏同步变化；
-    /// 起始价以拖动开始时模型当前价为准，避免被轮询刷新带偏）。
-    /// 构建 18 改为「先按住 0.25 秒、再滑动」：TestFlight（iOS 26 SDK）构建
-    /// 里直接拖动的 DragGesture 与列表滚动争抢手势，滚动时灵时不灵
-    /// （ren 2026-11-16 构建 17 实测）；改成按住起手后，普通纵向拖动永远
-    /// 不会激活这个手势，滚动不再被争抢，调价本身规则不变。
+    /// 在整行任意位置直接左右滑动调价（ren 2026-10-28 定版：横向每滑
+    /// 约 28pt 调整 0.5——右滑加、左滑减，拖动中即时写回模型，价格与
+    /// 本行盈亏同步变化；起始价以拖动开始时模型当前价为准）。
+    /// 与列表滚动的共存靠「严格横向门槛」（构建 20 定）：一次拖动先看
+    /// 方向——纵向位移先到 20pt 且不小于横向，本次拖动直接出局（纯滚动，
+    /// 之后再横偏也不调价）；横向位移先到 24pt 且至少是纵向的 2 倍，
+    /// 才认定调价并锁定起始价。判定全程只改 SwipeTracker（不触发重绘），
+    /// 斜向滚动不会再被中途掐断（构建 17 教训）；构建 18/19 试过
+    /// 「按住 0.25 秒再滑」，ren 实测横滑用不了，已弃。
     private var priceSwipeGesture: some Gesture {
-        LongPressGesture(minimumDuration: 0.25)
-            .sequenced(before: DragGesture(minimumDistance: 6, coordinateSpace: .local))
+        DragGesture(minimumDistance: 6, coordinateSpace: .local)
             .onChanged { value in
-                guard case .second(_, let drag?) = value else { return }
-                guard abs(drag.translation.width) > abs(drag.translation.height) else { return }
-                if swipeStartPrice == nil {
-                    swipeStartPrice = item.priceValue
-                    swipeStepsApplied = 0
+                if swipe.disqualified { return }
+                let w = value.translation.width
+                let h = value.translation.height
+                if swipe.startPrice == nil {
+                    if abs(h) >= 20, abs(h) >= abs(w) {
+                        swipe.disqualified = true
+                        return
+                    }
+                    guard abs(w) >= 24, abs(w) >= 2 * abs(h) else { return }
+                    swipe.startPrice = item.priceValue
+                    swipe.stepsApplied = 0
                 }
-                guard let start = swipeStartPrice, start > 0 else { return }
-                let steps = Int(drag.translation.width / 28)
-                guard steps != swipeStepsApplied else { return }
-                swipeStepsApplied = steps
+                guard let start = swipe.startPrice, start > 0 else { return }
+                let steps = Int(w / 28)
+                guard steps != swipe.stepsApplied else { return }
+                swipe.stepsApplied = steps
                 let newPrice = start + Double(steps) * 0.5
                 guard newPrice > 0 else { return }
                 onPriceChange(String(format: "%.2f", newPrice))
             }
             .onEnded { _ in
-                swipeStartPrice = nil
-                swipeStepsApplied = 0
+                swipe.startPrice = nil
+                swipe.stepsApplied = 0
+                swipe.disqualified = false
             }
     }
 
