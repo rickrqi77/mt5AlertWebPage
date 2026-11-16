@@ -52,13 +52,17 @@ final class WatchBridge: NSObject, WCSessionDelegate {
             replyHandler(["ok": false, "message": "指令格式不对"])
             return
         }
+        // replyHandler 是系统保证只回一次、可跨队列调用的句柄，但
+        // Swift 6 并发检查推不出这一点，进 @MainActor Task 前用
+        // nonisolated(unsafe) 放行（与史记 WatchBridge 同一处理）。
+        nonisolated(unsafe) let reply = replyHandler
         Task { @MainActor in
             guard let handler = WatchBridge.shared.onSetGridCommand else {
-                replyHandler(["ok": false, "message": "手机端还没准备好"])
+                reply(["ok": false, "message": "手机端还没准备好"])
                 return
             }
             let (ok, text) = await handler(step, perSide)
-            replyHandler(["ok": ok, "message": text])
+            reply(["ok": ok, "message": text])
         }
     }
 }
