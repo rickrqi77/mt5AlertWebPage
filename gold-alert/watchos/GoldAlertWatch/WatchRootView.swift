@@ -2,7 +2,8 @@ import SwiftUI
 
 /// 手表端界面分两页（ren 2026-11-15 定），竖向分页、上滑（或转表冠）翻页：
 /// 第一页是时钟页——日期在上、时间在下，居中显示，尺寸适配表盘；
-/// 底部中间只显示金价整数的末两位（如 4019 显示 19），字体小。
+/// 底部中间只显示金价整数的末两位（如 4019 显示 19），字号 20
+///（原 15，ren 2026-11-17 要求加大一点）。
 /// 三处文字共用一个亮度值（设定页滑杆 0–100 调，颜色不变、只改明暗）。
 /// 第二页是间隔设定页：顶部中间连接绿点（XAU/USD、Swiss 字样已去），
 /// 间隔选择、亮度进度条（原每边档数的位置；每边档数固定 7 不再
@@ -75,7 +76,7 @@ struct WatchRootView: View {
                 .opacity(model.brightnessFraction)
                 Spacer()
                 Text(priceDigits)
-                    .font(.system(size: 15, weight: .semibold, design: .rounded))
+                    .font(.system(size: 20, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
                     .opacity(model.brightnessFraction)
@@ -211,10 +212,14 @@ struct WatchRootView: View {
                     isContinuous: false,
                     isHapticFeedbackEnabled: true
                 )
+                // 数值框给足三位数宽度并优先保宽，进度条相应缩短：
+                // 原宽 26 时 100 显示不全（ren 2026-11-17 实测）。
                 Text("\(Int(model.brightness))")
                     .font(.caption2)
                     .monospacedDigit()
-                    .frame(width: 26)
+                    .lineLimit(1)
+                    .frame(width: 36)
+                    .layoutPriority(1)
             }
         }
         .onChange(of: model.brightness) { _ in

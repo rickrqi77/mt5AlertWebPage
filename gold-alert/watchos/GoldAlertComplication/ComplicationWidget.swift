@@ -2,12 +2,11 @@ import WidgetKit
 import SwiftUI
 
 /// 表盘复杂功能（点按即打开手表端 App，WidgetKit 复杂功能的默认行为）：
-/// 圆形/矩形/行内/边角四种样式都支持，价格取 Swissquote 公共报价
-/// （与表端 app 同源、无需凭据）。不显示品种名（ren 定）：圆形只显示
-/// 金价整数的末两位，矩形/行内只显示完整价格（无时间），边角显示整数价。
-/// 刷新节奏由系统的时间线预算决定（WidgetKit 每天约 40–75 次量级）：
-/// 下面 .after(15 分钟) 只是申请，系统可以推迟，所以表盘上是分钟级
-/// 快照价，2 秒/5 秒级刷新在表盘上做不到；点开 app 才是 0.5 秒一刷的实时价。
+/// 圆形/矩形/行内/边角四种样式都支持。2026-11-17 ren 改定：**只显示
+/// 铃铛图标、不显示任何价格数字**（取代原圆形末两位/矩形完整价/边角
+/// 整数价的数字方案）——复杂功能就是个打开 app 的按钮，价格进 app
+/// 看实时。价格时间线保留不删（provider 结构不动，日后想恢复数字
+/// 只需改 ComplicationView），当前视图不使用 entry.price。
 struct PriceEntry: TimelineEntry {
     let date: Date
     let price: Double
@@ -80,36 +79,20 @@ struct ComplicationView: View {
     @Environment(\.widgetFamily) private var family
     var entry: PriceEntry
 
-    private var priceFull: String {
-        entry.price > 0 ? String(format: "%.2f", entry.price) : "--"
-    }
-
-    private var priceInt: String {
-        entry.price > 0 ? String(format: "%.0f", entry.price) : "--"
-    }
-
-    /// 金价整数部分的末两位（3880.x → "80"，与 app 第一页口径一致）。
-    private var priceLastTwo: String {
-        entry.price > 0 ? String(format: "%02d", Int(entry.price) % 100) : "--"
-    }
-
+    /// 只显示铃铛图标（与手机端标题同一个铃铛），不显示数字
+    /// （ren 2026-11-17 定）。字号按样式给：矩形位最大、圆形次之、
+    /// 边角与行内较小。
     var body: some View {
+        Image(systemName: "bell.fill")
+            .font(.system(size: iconSize, weight: .semibold))
+    }
+
+    private var iconSize: CGFloat {
         switch family {
-        case .accessoryCircular:
-            Text(priceLastTwo)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .monospacedDigit()
-        case .accessoryRectangular:
-            Text(priceFull)
-                .font(.system(size: 20, weight: .bold, design: .rounded))
-                .monospacedDigit()
-        case .accessoryCorner:
-            Text(priceInt)
-                .font(.headline)
-                .monospacedDigit()
-        default:
-            Text(priceFull)
-                .monospacedDigit()
+        case .accessoryRectangular: return 30
+        case .accessoryCircular: return 22
+        case .accessoryCorner: return 19
+        default: return 16
         }
     }
 }
