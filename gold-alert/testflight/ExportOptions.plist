@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>teamID</key>
+	<string>YY8LQA5RA9</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>stripSwiftSymbols</key>
+	<true/>
+	<key>manageAppVersionAndBuildNumber</key>
+	<false/>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>com.rickrqi77.goldalert</key>
+		<string>GoldAlert AppStore</string>
+		<key>com.rickrqi77.goldalert.watchkitapp</key>
+		<string>GoldAlert Watch AppStore</string>
+		<key>com.rickrqi77.goldalert.watchkitapp.comp</key>
+		<string>GoldAlert Complication AppStore</string>
+	</dict>
+	<key>destination</key>
+	<string>export</string>
+</dict>
+</plist>
