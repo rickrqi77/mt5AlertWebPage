@@ -5,17 +5,18 @@ import SwiftUI
 /// 底部中间只显示金价整数的末两位（如 4019 显示 19），字体小。
 /// 三处文字共用一个亮度值（设定页滑杆 0–100 调，颜色不变、只改明暗）。
 /// 第二页是间隔设定页：顶部中间连接绿点（XAU/USD、Swiss 字样已去），
-/// 完整价格、间隔选择、亮度滑杆（原每边档数的位置；每边档数固定 7
-/// 不再可选）、最下方是价格刷新间隔选择（0.5/1/3/5/10 秒）。
-/// 没有推送按钮：点间隔即直接设定并推送；亮度滑杆松手（停下来）后
-/// 自动跳回第一页看效果。内容已按 42mm 一页高度收紧（ren 定不要
-/// 滚动）：无预览框、无分割线，字号与控件高度都压过。
+/// 间隔选择、亮度进度条（原每边档数的位置；每边档数固定 7 不再
+/// 可选）、最下方是价格刷新间隔选择（0.5/1/3/5/10 秒）。设定页顶部
+/// 的完整价格已去掉（ren 2026-11-16 定），整页不用滚动、一页放下。
+/// 没有推送按钮：点间隔即直接设定并推送；亮度停改（停下来）后
+/// 自动跳回第一页看效果。无预览框、无分割线，字号与控件高度都压过。
 /// 价格固定 Swiss（打开时 0.5 秒刷新、抬腕激活立刻先刷一次）；
 /// 推送只是把选择发给手机执行，手机不在附近时会明确报失败。
 struct WatchRootView: View {
     @EnvironmentObject private var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedPage = 0
+    @State private var jumpBackTask: Task<Void, Never>?
 
     var body: some View {
         TabView(selection: $selectedPage) {
@@ -112,28 +113,25 @@ struct WatchRootView: View {
     // MARK: - 第二页：间隔设定页
 
     private var settingsPage: some View {
-        ScrollView {
-            VStack(spacing: 4) {
-                header
-                priceBlock
-                stepPicker
-                brightnessSection
-                refreshPicker
-                if !model.phoneReachable {
-                    Text("推送需要手机在附近并保持连接")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                if let notice = model.notice {
-                    Text(notice)
-                        .font(.caption2)
-                        .foregroundStyle(model.noticeIsError ? .red : .green)
-                        .multilineTextAlignment(.center)
-                }
+        VStack(spacing: 3) {
+            header
+            stepPicker
+            brightnessSection
+            refreshPicker
+            if !model.phoneReachable {
+                Text("推送需要手机在附近并保持连接")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
-            .padding(.horizontal, 4)
+            if let notice = model.notice {
+                Text(notice)
+                    .font(.caption2)
+                    .foregroundStyle(model.noticeIsError ? .red : .green)
+                    .multilineTextAlignment(.center)
+            }
         }
+        .padding(.horizontal, 4)
     }
 
     /// 顶部只留连接状态点（绿=手机可达、灰=不可达），横向居中；
@@ -148,22 +146,14 @@ struct WatchRootView: View {
         }
     }
 
-    private var priceBlock: some View {
-        Text(model.swissPrice > 0 ? String(format: "%.2f", model.swissPrice) : "--")
-            .font(.system(size: 24, weight: .bold, design: .rounded))
-            .monospacedDigit()
-            .lineLimit(1)
-            .minimumScaleFactor(0.65)
-    }
-
     private var stepPicker: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 3) {
             Text("间隔")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             LazyVGrid(
                 columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 4
+                spacing: 3
             ) {
                 ForEach(WatchModel.stepChoices, id: \.self) { choice in
                     chip(
@@ -179,35 +169,75 @@ struct WatchRootView: View {
         }
     }
 
-    /// 亮度滑杆（在原「每边档数」的位置）：调第一页日期/时间/价格
-    /// 末两位共用的亮度值（拖动中就实时生效于同一个状态值）。
-    /// ren 定：滑杆停下来（松手）后自动跳回第一页，直接看到效果；
-    /// 时间日期预览框已去掉以适配一页高度。
+    /// 亮度控制（在原「每边档数」的位置）：调第一页日期/时间/价格
+    /// 末两位共用的亮度值（调节中就实时生效于同一个状态值）。
+    /// 不用系统 Slider：ren 2026-11-16 实测它的填充长度和数值对不上
+    /// （85 只显示一点点）。改自绘进度条，填充宽度严格 = 数值/100，
+    /// 拖动条身或转表冠都能调；停改 1.2 秒后自动跳回第一页看效果
+    /// （等价于原 Slider 的松手跳回）。
     private var brightnessSection: some View {
-        VStack(spacing: 4) {
-            // 这几个字本身也吃同一个亮度值（ren 定）：拖滑杆时看字的
+        VStack(spacing: 2) {
+            // 这几个字本身也吃同一个亮度值（ren 定）：调节时看字的
             // 明暗就能当场确认效果，不必先跳回第一页。
             Text("第一页亮度")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .opacity(model.brightnessFraction)
             HStack(spacing: 6) {
-                Slider(value: $model.brightness, in: 0...100, step: 1) { editing in
-                    if !editing {
-                        selectedPage = 0
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color.gray.opacity(0.3))
+                        RoundedRectangle(cornerRadius: 5)
+                            .fill(Color.blue)
+                            .frame(width: geo.size.width * CGFloat(model.brightness) / 100)
                     }
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { drag in
+                                let fraction = min(1, max(0, drag.location.x / geo.size.width))
+                                model.brightness = (fraction * 100).rounded()
+                            }
+                    )
                 }
+                .frame(height: 16)
+                .digitalCrownRotation(
+                    $model.brightness,
+                    from: 0,
+                    through: 100,
+                    by: 1,
+                    sensitivity: .medium,
+                    isContinuous: false,
+                    isHapticFeedbackEnabled: true
+                )
                 Text("\(Int(model.brightness))")
                     .font(.caption2)
                     .monospacedDigit()
                     .frame(width: 26)
             }
         }
+        .onChange(of: model.brightness) { _ in
+            scheduleJumpBackToClock()
+        }
+    }
+
+    /// 亮度停改 1.2 秒后跳回第一页；连续调节时每次变化都会顺延。
+    /// 只在人还停在设定页时才跳，避免误拉正在别处操作的手。
+    private func scheduleJumpBackToClock() {
+        jumpBackTask?.cancel()
+        jumpBackTask = Task {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            if Task.isCancelled { return }
+            if selectedPage == 1 {
+                selectedPage = 0
+            }
+        }
     }
 
     /// 设定页最下方：实时价格刷新间隔（单位秒，标题不带单位），五个一排。
     private var refreshPicker: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 2) {
             Text("刷新间隔")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
