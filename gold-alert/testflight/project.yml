@@ -35,9 +35,12 @@ targets:
         CFBundleInfoDictionaryVersion: "6.0"
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        LSRequiresIPhoneOS: true
         UILaunchScreen: {}
     entitlements:
       path: ../ios/GoldAlert/GoldAlert.entitlements
