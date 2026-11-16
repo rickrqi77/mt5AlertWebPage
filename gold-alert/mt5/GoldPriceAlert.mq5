@@ -364,6 +364,11 @@ void NotifyTrigger(const int alertId, const double price, const double triggerPr
    string msg = FormatPrice(triggerPrice) + " _ " + FormatPrice(price);
    if(InpMt5Popup)
       Alert(msg);
+   // 把触发上报服务器（/api/alert-trigger），服务器据此把该行标记为
+   // triggered，手机/网页才会显示「已用」。此前这里漏调 SendTrigger，
+   // 触发只弹窗 + Telegram，服务器无从标记（2026-11-16 查实修复）。
+   if(HasCloudApi())
+      SendTrigger(alertId, price, triggerPrice, direction);
    SendTelegram(msg);
 }
 
