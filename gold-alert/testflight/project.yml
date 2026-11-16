@@ -33,6 +33,12 @@ targets:
         CFBundleName: "$(PRODUCT_NAME)"
         CFBundlePackageType: APPL
         CFBundleInfoDictionaryVersion: "6.0"
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UILaunchScreen: {}
     entitlements:
       path: ../ios/GoldAlert/GoldAlert.entitlements
     settings:
@@ -62,6 +68,7 @@ targets:
         CFBundleDisplayName: 提醒事项
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
+        CFBundleIconName: AppIcon
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.rickrqi77.goldalert
     settings:
