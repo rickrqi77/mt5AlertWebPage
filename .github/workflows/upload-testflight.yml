@@ -43,6 +43,7 @@ jobs:
           printf '%s' "$PROFILE_COMPLICATION_BASE64" | base64 --decode > "$RUNNER_TEMP/signing/comp.mobileprovision"
           printf '%s' "$ASC_KEY_P8_BASE64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
           ls -la "$RUNNER_TEMP/signing"
+          shasum -a 256 "$RUNNER_TEMP/signing/dist.p12"
 
       - name: Import certificate and install profiles
         env:
