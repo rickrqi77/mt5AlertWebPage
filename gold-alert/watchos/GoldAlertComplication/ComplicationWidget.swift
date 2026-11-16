@@ -5,74 +5,29 @@ import SwiftUI
 /// 圆形/矩形/行内/边角四种样式都支持。2026-11-17 ren 改定：**只显示
 /// 铃铛图标、不显示任何价格数字**（取代原圆形末两位/矩形完整价/边角
 /// 整数价的数字方案）——复杂功能就是个打开 app 的按钮，价格进 app
-/// 看实时。价格时间线保留不删（provider 结构不动，日后想恢复数字
-/// 只需改 ComplicationView），当前视图不使用 entry.price。
+/// 看实时。
+/// 构建 21 起时间线改**全静态**：图标不需要任何数据，provider 不再
+/// 联网取价、policy 为 .never。原因（ren 构建 19 实测、照片实证）：
+/// 原 provider 的 snapshot/timeline 都要先等 Swissquote 网络请求
+/// （10 秒超时），手表端网络常完不成，WidgetKit 预算耗尽后表盘就
+/// 一直显示系统占位灰条（矩形位是一条灰色横条）、真实内容画不出
+/// 来。静态时间线即时完成，占位条随之消失。
 struct PriceEntry: TimelineEntry {
     let date: Date
-    let price: Double
 }
 
 struct PriceProvider: TimelineProvider {
     func placeholder(in context: Context) -> PriceEntry {
-        PriceEntry(date: Date(), price: 4013.8)
+        PriceEntry(date: Date())
     }
 
     func getSnapshot(in context: Context, completion: @escaping (PriceEntry) -> Void) {
-        Self.fetchPrice { price in
-            completion(PriceEntry(date: Date(), price: price))
-        }
+        completion(PriceEntry(date: Date()))
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<PriceEntry>) -> Void) {
-        Self.fetchPrice { price in
-            let now = Date()
-            let entry = PriceEntry(date: now, price: price)
-            let next = now.addingTimeInterval(15 * 60)
-            completion(Timeline(entries: [entry], policy: .after(next)))
-        }
+        completion(Timeline(entries: [PriceEntry(date: Date())], policy: .never))
     }
-
-    private static func fetchPrice(completion: @escaping (Double) -> Void) {
-        guard let url = URL(string: "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/XAU/USD") else {
-            completion(0)
-            return
-        }
-        var request = URLRequest(url: url)
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 10
-        URLSession.shared.dataTask(with: request) { data, _, _ in
-            var price = 0.0
-            if let data = data,
-               let rows = try? JSONDecoder().decode([SwissRow].self, from: data) {
-                price = pickMidPrice(from: rows)
-            }
-            completion(price)
-        }.resume()
-    }
-
-    private static func pickMidPrice(from rows: [SwissRow]) -> Double {
-        var fallback = 0.0
-        for row in rows {
-            for profile in row.spreadProfilePrices ?? [] {
-                guard let bid = profile.bid, let ask = profile.ask,
-                      bid > 0, ask > 0, ask >= bid else { continue }
-                let mid = ((bid + ask) / 2 * 1000).rounded() / 1000
-                if fallback == 0 { fallback = mid }
-                if profile.spreadProfile == "prime" { return mid }
-            }
-        }
-        return fallback
-    }
-}
-
-private struct SwissRow: Decodable {
-    var spreadProfilePrices: [SwissProfile]?
-}
-
-private struct SwissProfile: Decodable {
-    var spreadProfile: String?
-    var bid: Double?
-    var ask: Double?
 }
 
 struct ComplicationView: View {
