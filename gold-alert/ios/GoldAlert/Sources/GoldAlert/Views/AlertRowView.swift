@@ -17,16 +17,13 @@ struct AlertRowView: View {
     // 逐行显示的正是旧 step3 网格在相同行号上的旧值），靠 onAppear/task/onChange
     // 同步总有行漏掉。改为直接绑定模型值：模型是什么价，画面就显示什么价，
     // 没有第二份状态可以残留。
-    /// 滑动调价进度：本次拖动的起始价、已应用步数、是否已判定为滚动
-    /// （出局）。放在普通类里而不是 @State：判定过程中改它不能触发
-    /// 视图重绘——构建 17 实测，斜向滚动时手势 onChanged 里写 @State
-    /// 会把列表的滚动手势中途掐掉（滚动时灵时不灵的根源）。
+    /// 滑动调价进度：本次拖动的起始价与已应用步数。放在普通类里而不是
+    /// @State：改它不触发视图重绘，手势过程更稳（构建 20 引入，保留）。
     @State private var swipe = SwipeTracker()
 
     private final class SwipeTracker {
         var startPrice: Double?
         var stepsApplied = 0
-        var disqualified = false
     }
 
     /// 价格字段直接读写模型：读 = item.priceText，写 = 用户编辑时回传模型。
@@ -97,7 +94,7 @@ struct AlertRowView: View {
             }
         }
         // 滑动调价：在整行任意位置直接左右滑动调价（ren 2026-10-28 改定
-        // 整行可滑；与滚动的共存靠手势内的严格横向门槛，见
+        // 整行可滑；构建 22 分页后无滚动区，手势无争抢，见
         // priceSwipeGesture 说明）。simultaneous 不挡点按：价格仍可
         // 点开编辑、右侧按钮仍可点。
         .simultaneousGesture(priceSwipeGesture)
@@ -105,30 +102,20 @@ struct AlertRowView: View {
 
     /// 在整行任意位置直接左右滑动调价（ren 2026-10-28 定版：横向每滑
     /// 约 28pt 调整 0.5——右滑加、左滑减，拖动中即时写回模型，价格与
-    /// 本行盈亏同步变化；起始价以拖动开始时模型当前价为准）。
-    /// 与列表滚动的共存靠「严格横向门槛」（构建 20 定）：一次拖动先看
-    /// 方向——纵向位移先到 20pt 且不小于横向，本次拖动直接出局（纯滚动，
-    /// 之后再横偏也不调价）；横向位移先到 24pt 且至少是纵向的 2 倍，
-    /// 才认定调价并锁定起始价。判定全程只改 SwipeTracker（不触发重绘），
-    /// 斜向滚动不会再被中途掐断（构建 17 教训）；构建 18/19 试过
-    /// 「按住 0.25 秒再滑」，ren 实测横滑用不了，已弃。
+    /// 本行盈亏同步变化；起始价以拖动开始时模型当前价为准；只认横向
+    /// 为主的拖动）。构建 22 列表改分页、无滚动区后，这个手势不再与
+    /// 任何滚动手势共存，恢复最初的直接形态（构建 18–20 为绕滚动
+    /// 争抢试过的按住起手/方向门槛都随滚动一起弃用）。
     private var priceSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 6, coordinateSpace: .local)
+        DragGesture(minimumDistance: 12, coordinateSpace: .local)
             .onChanged { value in
-                if swipe.disqualified { return }
-                let w = value.translation.width
-                let h = value.translation.height
+                guard abs(value.translation.width) > abs(value.translation.height) else { return }
                 if swipe.startPrice == nil {
-                    if abs(h) >= 20, abs(h) >= abs(w) {
-                        swipe.disqualified = true
-                        return
-                    }
-                    guard abs(w) >= 24, abs(w) >= 2 * abs(h) else { return }
                     swipe.startPrice = item.priceValue
                     swipe.stepsApplied = 0
                 }
                 guard let start = swipe.startPrice, start > 0 else { return }
-                let steps = Int(w / 28)
+                let steps = Int(value.translation.width / 28)
                 guard steps != swipe.stepsApplied else { return }
                 swipe.stepsApplied = steps
                 let newPrice = start + Double(steps) * 0.5
@@ -138,7 +125,6 @@ struct AlertRowView: View {
             .onEnded { _ in
                 swipe.startPrice = nil
                 swipe.stepsApplied = 0
-                swipe.disqualified = false
             }
     }
 

@@ -8,8 +8,11 @@ struct MainView: View {
     @State private var confirmSaveEmpty = false
     /// 点最终价弹出的明细页（公式各项可看可改）。
     @State private var showLiquidationDetail = false
-    // 注：提醒列表已改固定行距 + 固定滚动区（构建 17），不再实测行高/面板
-    // 高度去拉伸行距，见 alertsPanel 处说明。
+    // 注：提醒列表已改固定行距（构建 17）；构建 22 起再改成分页（第一页
+    // 9 行、第二页其余，标题右侧按钮翻页），彻底不用滚动，见 alertsPanel
+    // 处说明（ren 2026-11-17 定：滚动在这条构建线上始终不稳，弃用）。
+    /// 当前页（0 起）：0 = 前 9 行，1 = 其余行。
+    @State private var alertPage = 0
 
     var body: some View {
         // 无外层滚动条：整屏紧凑排版一屏装下，提醒行多时只在面板内部滚动。
@@ -268,6 +271,30 @@ struct MainView: View {
                         .foregroundStyle(.primary)
                 }
                 Spacer()
+                // 翻页按钮放在「提醒价格」右边（ren 2026-11-17 定）：上一页 /
+                // 下一页，中间小字是页码。只有一页时不显示。
+                if totalAlertPages > 1 {
+                    HStack(spacing: 10) {
+                        Button {
+                            alertPage = max(0, alertPage - 1)
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.subheadline.weight(.bold))
+                        }
+                        .disabled(alertPage == 0)
+                        Text("\(alertPage + 1)/\(totalAlertPages)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                        Button {
+                            alertPage = min(totalAlertPages - 1, alertPage + 1)
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.subheadline.weight(.bold))
+                        }
+                        .disabled(alertPage >= totalAlertPages - 1)
+                    }
+                }
                 // 右上角的「触发 n / 总数」计数不再显示（ren 2026-10-28 要求去掉）。
             }
 
@@ -278,29 +305,24 @@ struct MainView: View {
                     .padding(.vertical, 16)
                     .frame(maxWidth: .infinity)
             } else {
-                // 列表不做任何自动滚动：数据变化、推送完成、价格更新都不移动位置，
-                // 停在哪里完全由用户自己滑动决定（ren 21:48 明确取消自动定位到当前价）。
-                // 中间是固定滚动区：高度由外层 VStack 分配（面板占满标题行与
-                // 底部按钮之间的剩余空间），行距固定，超出的行在区内滚动；
-                // 底部按钮是 VStack 的固定成员、永远先占位，不会被滚动区
-                // 挤出画面（ren 2026-11-16 构建 17 改定，取代原「实测行高 +
-                // 拉伸行距填满面板」的自适应系统——该系统在 TestFlight 构建
-                // 里把行距拉到上限、面板高度失控，列表与按钮一起溢出）。
-                ScrollView(.vertical, showsIndicators: false) { // 滚动时不显示右侧滚动条（ren 2026-10-28）
-                    LazyVStack(alignment: .leading, spacing: Self.rowSpacing) {
-                        ForEach(Array(model.alerts.enumerated()), id: \.element.rowKey) { index, item in
-                            AlertRowView(
-                                index: index,
-                                item: item,
-                                pnl: pnl(for: item),
-                                pnlInteger: liquidation.mode == .jpy,
-                                onPriceChange: { model.updatePrice(at: index, text: $0) },
-                                onToggleArm: { model.toggleArm(at: index) }
-                            )
-                            // 行身份只能用 rowKey，绝不能用 .id(index) 按位置认行：
-                            // 按位置认行时视图被复用到新设定同行号上，是新旧混合的来源。
-                            .id(item.rowKey)
-                        }
+                // 分页显示（ren 2026-11-17 定，弃滚动）：第一页 9 行、第二页
+                // 其余，用标题右侧的上一页/下一页按钮切换。TestFlight 构建里
+                // 列表滚动始终不稳（构建 17–21 先后试过固定滚动区、手势门槛
+                // 等都不成），分页没有滚动手势可争，行的横滑调价也随之
+                // 不再被任何滚动区干扰。
+                VStack(alignment: .leading, spacing: Self.rowSpacing) {
+                    ForEach(pagedAlerts, id: \.item.rowKey) { pair in
+                        AlertRowView(
+                            index: pair.index,
+                            item: pair.item,
+                            pnl: pnl(for: pair.item),
+                            pnlInteger: liquidation.mode == .jpy,
+                            onPriceChange: { model.updatePrice(at: pair.index, text: $0) },
+                            onToggleArm: { model.toggleArm(at: pair.index) }
+                        )
+                        // 行身份只能用 rowKey，绝不能用 .id(index) 按位置认行：
+                        // 按位置认行时视图被复用到新设定同行号上，是新旧混合的来源。
+                        .id(pair.item.rowKey)
                     }
                 }
             }
@@ -311,11 +333,35 @@ struct MainView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         // 提醒区域不要独立底色，与画面背景同色（appBackground）。
         .background(Color.appBackground)
+        // 行数变化时把页码收进有效范围；换了新网格（第一行身份变了）
+        // 就回到第一页。
+        .onChange(of: model.alerts.count) { _ in
+            if alertPage > totalAlertPages - 1 { alertPage = totalAlertPages - 1 }
+        }
+        .onChange(of: model.alerts.first?.rowKey) { _ in
+            alertPage = 0
+        }
     }
 
-    /// 固定行间隔（构建 17 改定）：单行实测高约 51，间隔 8 时 9 行共约
-    /// 520，正好在面板可用高度内完整显示 9 行，其余在滚动区内滑动查看。
+    /// 固定行间隔（构建 17 改定）：单行实测高约 51，间隔 8 时 9 行共约 520，
+    /// 正好一页完整放下（分页后即第一页的 9 行，构建 22）。
     private static let rowSpacing: CGFloat = 8
+
+    /// 每页行数：第一页 9 行，第二页其余（ren 2026-11-17 分页定版）。
+    private static let rowsPerPage = 9
+
+    /// 总页数（至少 1）。
+    private var totalAlertPages: Int {
+        max(1, (model.alerts.count + Self.rowsPerPage - 1) / Self.rowsPerPage)
+    }
+
+    /// 当前页的行（带全表下标，行内序号与操作都按全表位置）。
+    private var pagedAlerts: [(index: Int, item: AlertItem)] {
+        let start = alertPage * Self.rowsPerPage
+        guard start < model.alerts.count else { return [] }
+        let end = min(start + Self.rowsPerPage, model.alerts.count)
+        return (start..<end).map { ($0, model.alerts[$0]) }
+    }
 
     /// 每行盈亏数字：价格到达这一行通知价时，持仓的实际盈亏（与 MT5 显示同号）。
     /// buy：(通知价格 − 平均价) × 合计手数 × 100；
