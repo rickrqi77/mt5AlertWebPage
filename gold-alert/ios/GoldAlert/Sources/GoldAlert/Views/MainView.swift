@@ -8,14 +8,15 @@ struct MainView: View {
     @State private var confirmSaveEmpty = false
     /// 点最终价弹出的明细页（公式各项可看可改）。
     @State private var showLiquidationDetail = false
-    // 注：提醒列表已改固定行距（构建 17）；构建 22 起再改成分页（第一页
-    // 9 行、第二页其余，标题右侧按钮翻页），彻底不用滚动，见 alertsPanel
-    // 处说明（ren 2026-11-17 定：滚动在这条构建线上始终不稳，弃用）。
-    /// 当前页（0 起）：0 = 前 9 行，1 = 其余行。
+    // 注：提醒列表已改固定行距（构建 17）；构建 22 起再改成分页、彻底
+    // 不用滚动；构建 24 起每页按 8 行设计（第一页 8 行、第二页 7 行，
+    // 两页行高行距一致），标题右侧按钮与列表上左右滑都能翻页，整行
+    // 左右滑调价同时删除（ren 2026-11-17 定），见 alertsPanel 处说明。
+    /// 当前页（0 起）：0 = 前 8 行，1 = 其余 7 行。
     @State private var alertPage = 0
 
     var body: some View {
-        // 无外层滚动条：整屏紧凑排版一屏装下，提醒行多时只在面板内部滚动。
+        // 无滚动：整屏紧凑排版一屏装下，提醒行分两页显示（见 alertsPanel）。
         VStack(alignment: .leading, spacing: 6) {
             header
             priceHero
@@ -305,11 +306,13 @@ struct MainView: View {
                     .padding(.vertical, 16)
                     .frame(maxWidth: .infinity)
             } else {
-                // 分页显示（ren 2026-11-17 定，弃滚动）：第一页 9 行、第二页
-                // 其余，用标题右侧的上一页/下一页按钮切换。TestFlight 构建里
-                // 列表滚动始终不稳（构建 17–21 先后试过固定滚动区、手势门槛
-                // 等都不成），分页没有滚动手势可争，行的横滑调价也随之
-                // 不再被任何滚动区干扰。
+                // 分页显示（ren 2026-11-17 定，弃滚动）：每页按 8 行设计，
+                // 第一页 8 行、第二页 7 行，两页行高与行距完全一致（第二页
+                // 不拉伸补白）。翻页两种方式并存：标题右侧的上一页/下一页
+                // 按钮，以及在列表上左右滑动（pageSwipeGesture）。整行左右
+                // 滑调价已删除，改价只靠点开价格编辑。TestFlight 构建里列表
+                // 滚动始终不稳（构建 17–21 先后试过固定滚动区、手势门槛等
+                // 都不成），分页没有滚动手势可争。
                 VStack(alignment: .leading, spacing: Self.rowSpacing) {
                     ForEach(pagedAlerts, id: \.item.rowKey) { pair in
                         AlertRowView(
@@ -325,6 +328,7 @@ struct MainView: View {
                         .id(pair.item.rowKey)
                     }
                 }
+                .gesture(pageSwipeGesture)
             }
         }
         .padding(10)
@@ -343,12 +347,33 @@ struct MainView: View {
         }
     }
 
-    /// 固定行间隔（构建 17 改定）：单行实测高约 51，间隔 8 时 9 行共约 520，
-    /// 正好一页完整放下（分页后即第一页的 9 行，构建 22）。
+    /// 固定行间隔（构建 17 改定）：单行实测高约 51，间隔 8 时 8 行共约
+    /// 464，一页完整放下且有余量。两页共用同一行高与行距，第二页 7 行
+    /// 保持同尺寸、不拉伸（ren 2026-11-17 定：每页按 8 条设计）。
     private static let rowSpacing: CGFloat = 8
 
-    /// 每页行数：第一页 9 行，第二页其余（ren 2026-11-17 分页定版）。
-    private static let rowsPerPage = 9
+    /// 每页行数：第一页 8 行，第二页其余 7 行（ren 2026-11-17 改定，
+    /// 原分页初版为 9+6）。
+    private static let rowsPerPage = 8
+
+    /// 列表左右滑翻页（ren 2026-11-17 定，与标题右侧翻页按钮并存）：
+    /// 左滑去下一页、右滑回上一页。横向拖动过 50pt 且横向为主才触发；
+    /// 行上已无自己的拖动手势（左右滑调价同日删除），点按价格编辑与
+    /// 点按钮不受影响（拖动未及门槛时手势不介入）。
+    private var pageSwipeGesture: some Gesture {
+        DragGesture(minimumDistance: 20, coordinateSpace: .local)
+            .onEnded { value in
+                guard totalAlertPages > 1 else { return }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                guard abs(dx) > 50, abs(dx) > abs(dy) * 1.5 else { return }
+                if dx < 0 {
+                    alertPage = min(totalAlertPages - 1, alertPage + 1)
+                } else {
+                    alertPage = max(0, alertPage - 1)
+                }
+            }
+    }
 
     /// 总页数（至少 1）。
     private var totalAlertPages: Int {

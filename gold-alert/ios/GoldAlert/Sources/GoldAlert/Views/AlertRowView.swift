@@ -17,15 +17,6 @@ struct AlertRowView: View {
     // 逐行显示的正是旧 step3 网格在相同行号上的旧值），靠 onAppear/task/onChange
     // 同步总有行漏掉。改为直接绑定模型值：模型是什么价，画面就显示什么价，
     // 没有第二份状态可以残留。
-    /// 滑动调价进度：本次拖动的起始价与已应用步数。放在普通类里而不是
-    /// @State：改它不触发视图重绘，手势过程更稳（构建 20 引入，保留）。
-    @State private var swipe = SwipeTracker()
-
-    private final class SwipeTracker {
-        var startPrice: Double?
-        var stepsApplied = 0
-    }
-
     /// 价格字段直接读写模型：读 = item.priceText，写 = 用户编辑时回传模型。
     private var priceBinding: Binding<String> {
         Binding(get: { item.priceText }, set: { onPriceChange($0) })
@@ -43,7 +34,8 @@ struct AlertRowView: View {
                 .layoutPriority(2)
 
             // 价格数字：无背景框，与背景同色（整行不要独立底色，ren 23:10 定版）。
-            // 滑动调价手势挂在整行上（见 body 末尾），不只价格这一小块。
+            // 改价只靠点开编辑：整行左右滑调价已删除（ren 2026-11-17 定），
+            // 左右滑改由列表层翻页（见 MainView 的 pageSwipeGesture）。
             SelectAllPriceField(text: priceBinding)
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
@@ -52,7 +44,7 @@ struct AlertRowView: View {
 
             // 盈亏数字：价格与触发按钮之间，显示两位小数，无背景框。
             // 宽度给足以原字体大小完整显示大数字（如 -12345.67），不许缩小字体。
-            // 通知价一变（含滑动调价写回模型），本行盈亏随画面重算同步跟着变
+            // 通知价一变（编辑改价写回模型），本行盈亏随画面重算同步跟着变
             //（值由 MainView 按模式公式算好传入）。
             Text(pnlText)
                 .font(.body.monospacedDigit().weight(.semibold))
@@ -93,39 +85,6 @@ struct AlertRowView: View {
                     .frame(height: 1)
             }
         }
-        // 滑动调价：在整行任意位置直接左右滑动调价（ren 2026-10-28 改定
-        // 整行可滑；构建 22 分页后无滚动区，手势无争抢，见
-        // priceSwipeGesture 说明）。simultaneous 不挡点按：价格仍可
-        // 点开编辑、右侧按钮仍可点。
-        .simultaneousGesture(priceSwipeGesture)
-    }
-
-    /// 在整行任意位置直接左右滑动调价（ren 2026-10-28 定版：横向每滑
-    /// 约 28pt 调整 0.5——右滑加、左滑减，拖动中即时写回模型，价格与
-    /// 本行盈亏同步变化；起始价以拖动开始时模型当前价为准；只认横向
-    /// 为主的拖动）。构建 22 列表改分页、无滚动区后，这个手势不再与
-    /// 任何滚动手势共存，恢复最初的直接形态（构建 18–20 为绕滚动
-    /// 争抢试过的按住起手/方向门槛都随滚动一起弃用）。
-    private var priceSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .local)
-            .onChanged { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                if swipe.startPrice == nil {
-                    swipe.startPrice = item.priceValue
-                    swipe.stepsApplied = 0
-                }
-                guard let start = swipe.startPrice, start > 0 else { return }
-                let steps = Int(value.translation.width / 28)
-                guard steps != swipe.stepsApplied else { return }
-                swipe.stepsApplied = steps
-                let newPrice = start + Double(steps) * 0.5
-                guard newPrice > 0 else { return }
-                onPriceChange(String(format: "%.2f", newPrice))
-            }
-            .onEnded { _ in
-                swipe.startPrice = nil
-                swipe.stepsApplied = 0
-            }
     }
 
     private var pnlText: String {
