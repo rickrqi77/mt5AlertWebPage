@@ -91,9 +91,7 @@ jobs:
         env:
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
-          cp ../ios/GoldAlert/Info.plist /tmp/phone-info-backup.plist
           xcodegen generate
-          cp /tmp/phone-info-backup.plist ../ios/GoldAlert/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" ../ios/GoldAlert/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" ../watchos/GoldAlertWatch/Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" ../watchos/GoldAlertComplication/Info.plist
