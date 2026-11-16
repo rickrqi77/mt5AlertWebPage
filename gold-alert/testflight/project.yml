@@ -17,6 +17,7 @@ settings:
     CURRENT_PROJECT_VERSION: "1"
     CODE_SIGN_STYLE: Manual
     CODE_SIGN_IDENTITY: Apple Distribution
+    DEVELOPMENT_TEAM: YY8LQA5RA9
 targets:
   GoldAlert:
     type: application
