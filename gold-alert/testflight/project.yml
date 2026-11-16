@@ -42,6 +42,21 @@ targets:
           - UIInterfaceOrientationLandscapeRight
         LSRequiresIPhoneOS: true
         UILaunchScreen: {}
+        # 以下键原本只写在 ios/GoldAlert/Info.plist 里，但 XcodeGen 生成工程时
+        # 会用 info.properties 整份重写该 plist、不合并磁盘文件，缺了就被静默
+        # 丢掉（xtool 直接用磁盘 plist，所以那边一直正常）。必须在此补全：
+        # 显示名、自家 scheme 注册、跳转声明、相册权限说明、加密合规。
+        CFBundleDisplayName: 提醒事项
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationQueriesSchemes:
+          - xauusd
+          - metatrader5
+        CFBundleURLTypes:
+          - CFBundleURLName: com.rickrqi77.goldalert
+            CFBundleURLSchemes:
+              - goldalert
+        NSPhotoLibraryUsageDescription: 读取交易截图以计算黄金持仓最终价，并可在计算后删除该截图。
+        NSPhotoLibraryAddUsageDescription: 用于在计算完成后按你的选择删除交易截图。
     entitlements:
       path: ../ios/GoldAlert/GoldAlert.entitlements
     settings:
