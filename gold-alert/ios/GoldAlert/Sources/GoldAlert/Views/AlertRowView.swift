@@ -70,7 +70,7 @@ struct AlertRowView: View {
         }
         // 每行统一的上下内边距：内容（尤其触发按钮）不再撑满整行高度，
         // 与上下分割线之间留出一致的空隙，每行间距看起来就一样了
-        //（ren 2026-10-28）。行高变大由 MainView 的实测自动适配。
+        //（ren 2026-10-28）。行高固定约 51，MainView 侧固定行距排布。
         .padding(.vertical, 6)
         // 行底色与画面背景同色（appBackground：深色黑，浅色略压亮度的浅灰）。
         .background(Color.appBackground)
@@ -89,26 +89,31 @@ struct AlertRowView: View {
                     .frame(height: 1)
             }
         }
-        // 滑动调价：在整行任意位置左右滑动都能调（ren 2026-10-28 改定，
-        // 原来只在价格数字上）。simultaneous 不挡点按：价格仍可点开编辑、
-        // 右侧按钮仍可点；纵向拖动仍是列表滚动（手势内按横向主导判定）。
+        // 滑动调价：在整行任意位置按住后左右滑动调价（ren 2026-10-28 改定
+        // 整行可滑；构建 18 起改为按住起手，见 priceSwipeGesture 说明）。
+        // simultaneous 不挡点按：价格仍可点开编辑、右侧按钮仍可点。
         .simultaneousGesture(priceSwipeGesture)
     }
 
-    /// 在整行任意位置左右滑动调价（ren 2026-10-28 恢复此手势、同日晚改整行，滑动删除取消）：
-    /// 横向每滑约 28pt 调整 0.5——右滑加、左滑减。拖动中即时写回模型，
-    /// 价格与本行盈亏数字同步变化；只认横向滑动，纵向仍是列表滚动。
-    /// 起始价在拖动开始时以模型当前价为准，避免中途被轮询刷新带偏。
+    /// 在整行任意位置滑动调价（ren 2026-10-28 定版：横向每滑约 28pt 调整
+    /// 0.5——右滑加、左滑减，拖动中即时写回模型，价格与本行盈亏同步变化；
+    /// 起始价以拖动开始时模型当前价为准，避免被轮询刷新带偏）。
+    /// 构建 18 改为「先按住 0.25 秒、再滑动」：TestFlight（iOS 26 SDK）构建
+    /// 里直接拖动的 DragGesture 与列表滚动争抢手势，滚动时灵时不灵
+    /// （ren 2026-11-16 构建 17 实测）；改成按住起手后，普通纵向拖动永远
+    /// 不会激活这个手势，滚动不再被争抢，调价本身规则不变。
     private var priceSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 12, coordinateSpace: .local)
+        LongPressGesture(minimumDuration: 0.25)
+            .sequenced(before: DragGesture(minimumDistance: 6, coordinateSpace: .local))
             .onChanged { value in
-                guard abs(value.translation.width) > abs(value.translation.height) else { return }
+                guard case .second(_, let drag?) = value else { return }
+                guard abs(drag.translation.width) > abs(drag.translation.height) else { return }
                 if swipeStartPrice == nil {
                     swipeStartPrice = item.priceValue
                     swipeStepsApplied = 0
                 }
                 guard let start = swipeStartPrice, start > 0 else { return }
-                let steps = Int(value.translation.width / 28)
+                let steps = Int(drag.translation.width / 28)
                 guard steps != swipeStepsApplied else { return }
                 swipeStepsApplied = steps
                 let newPrice = start + Double(steps) * 0.5
