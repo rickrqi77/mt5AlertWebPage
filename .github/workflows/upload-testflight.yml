@@ -121,6 +121,14 @@ jobs:
             -exportOptionsPlist ExportOptions.plist
           ls -la "$RUNNER_TEMP/export"
 
+      - name: Keep IPA artifact for diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GoldAlert-ipa
+          path: ${{ runner.temp }}/export/*.ipa
+          retention-days: 3
+
       - name: Upload to App Store Connect
         env:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
