@@ -27,6 +27,12 @@ targets:
       - path: PhoneAssets/Assets.xcassets
     info:
       path: ../ios/GoldAlert/Info.plist
+      properties:
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        CFBundleName: "$(PRODUCT_NAME)"
+        CFBundlePackageType: APPL
+        CFBundleInfoDictionaryVersion: "6.0"
     entitlements:
       path: ../ios/GoldAlert/GoldAlert.entitlements
     settings:
@@ -48,6 +54,11 @@ targets:
     info:
       path: ../watchos/GoldAlertWatch/Info.plist
       properties:
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        CFBundleName: "$(PRODUCT_NAME)"
+        CFBundlePackageType: APPL
+        CFBundleInfoDictionaryVersion: "6.0"
         CFBundleDisplayName: 提醒事项
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
@@ -72,6 +83,11 @@ targets:
     info:
       path: ../watchos/GoldAlertComplication/Info.plist
       properties:
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        CFBundleName: "$(PRODUCT_NAME)"
+        CFBundlePackageType: XPC!
+        CFBundleInfoDictionaryVersion: "6.0"
         CFBundleDisplayName: 金价
         CFBundleShortVersionString: "1.0"
         CFBundleVersion: "1"
