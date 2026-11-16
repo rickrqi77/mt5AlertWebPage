@@ -9,6 +9,10 @@ struct AlertRowView: View {
     /// 日元模式下盈亏只显示整数、不带小数（ren 2026-10-30：日元收益金额大、
     /// MT5 本身也只显示整数日元）；美元模式仍显示两位小数。
     let pnlInteger: Bool
+    /// 是否是当前页的第一行：是则在行上方也画一条分割线（顶线）。
+    /// 按页判断而非全表第 0 行——第二页首行（全表第 9 行）同样需要顶线，
+    /// 构建 24 前用全表下标判断，第二页一直缺这条线。
+    var isFirstInPage: Bool = false
     let onPriceChange: (String) -> Void
     let onToggleArm: () -> Void
 
@@ -70,16 +74,16 @@ struct AlertRowView: View {
         .padding(.vertical, 6)
         // 行底色与画面背景同色（appBackground：深色黑，浅色略压亮度的浅灰）。
         .background(Color.appBackground)
-        // 行间分割线（ren 2026-10-28 要求）：每一行下方画一条线，第一行上方
-        // 也画一条（最后一行下方的线就是它自己的底线）。用 overlay 画，
-        // 不占布局尺寸，不影响行高实测与可视高度。
+        // 行间分割线（ren 2026-10-28 要求）：每一行下方画一条线，每页的
+        // 第一行上方也画一条（最后一行下方的线就是它自己的底线）。用
+        // overlay 画，不占布局尺寸，不影响行高。
         .overlay(alignment: .bottom) {
             Rectangle()
                 .fill(Color.primary.opacity(0.25))
                 .frame(height: 1)
         }
         .overlay(alignment: .top) {
-            if index == 0 {
+            if isFirstInPage {
                 Rectangle()
                     .fill(Color.primary.opacity(0.25))
                     .frame(height: 1)

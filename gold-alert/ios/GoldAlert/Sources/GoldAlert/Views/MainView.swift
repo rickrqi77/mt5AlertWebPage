@@ -320,6 +320,7 @@ struct MainView: View {
                             item: pair.item,
                             pnl: pnl(for: pair.item),
                             pnlInteger: liquidation.mode == .jpy,
+                            isFirstInPage: pair.index == alertPage * Self.rowsPerPage,
                             onPriceChange: { model.updatePrice(at: pair.index, text: $0) },
                             onToggleArm: { model.toggleArm(at: pair.index) }
                         )
@@ -330,6 +331,12 @@ struct MainView: View {
                 }
                 .gesture(pageSwipeGesture)
             }
+
+            // 吸收面板的多余高度：面板被外层拉满一屏高，行数少时若没有
+            // 这一层，SwiftUI 会把多余高度分摊进行高与行距里——构建 24
+            // 实测第一页行高约 60、第二页约 70（总高相同、余量摊进行里）。
+            // Spacer 先把余量吃掉，两页行高都回到自然高度、完全一致。
+            Spacer(minLength: 0)
         }
         .padding(10)
         // 面板占满工具栏下方的全部空间、内容顶对齐：清除到空列表时也稳稳贴在上方，
