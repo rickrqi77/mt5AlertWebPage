@@ -63,6 +63,13 @@ actor CloudflareClient {
         try await post("/api/pause", baseURL: baseURL, token: token, json: ["paused": paused])
     }
 
+    /// 下发一键全平指令：服务器存一条一次性指令（30 秒过期），
+    /// EA 在下一次 3 秒同步的响应里领走并执行，结果经 /api/status 的
+    /// last_command 回报。
+    func sendCloseAllCommand(baseURL: String, token: String) async throws -> CommandResponse {
+        try await post("/api/command", baseURL: baseURL, token: token, json: ["type": "close_all"])
+    }
+
     // MARK: - HTTP
 
     private func get<T: Decodable>(_ path: String, baseURL: String, token: String) async throws -> T {

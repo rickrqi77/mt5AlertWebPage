@@ -48,6 +48,30 @@ struct StatusPayload: Decodable, Sendable {
     var sync_seconds: Int?
     var alerts: [AlertDTO]?
     var config_version: Int?
+    var positions_count: Int?
+    var last_command: LastCommand?
+}
+
+/// 最近一条服务器指令（一键全平）的状态与执行结果。
+struct LastCommand: Decodable, Sendable {
+    var id: Int?
+    var type: String?
+    var state: String?
+    var closed: Int?
+    var failed: Int?
+    var profit: Double?
+    var error: String?
+    var created_at: Double?
+    var executed_at: Double?
+}
+
+/// POST /api/command 的回执。
+struct CommandResponse: Decodable, Sendable {
+    var ok: Bool?
+    var id: Int?
+    var reused: Bool?
+    var expires_at: Double?
+    var ea_online: Bool?
 }
 
 struct AlertsPayload: Decodable, Sendable {

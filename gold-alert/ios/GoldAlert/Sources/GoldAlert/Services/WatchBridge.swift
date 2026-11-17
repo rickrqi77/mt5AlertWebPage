@@ -13,6 +13,11 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// 入参 (间隔, 每边档数)，返回 (是否成功, 给手表显示的结果文案)。
     var onSetGridCommand: ((Double, Int) async -> (Bool, String))?
 
+    /// 手表一键全平的两个处理者（准备=查 EA 在线与持仓数；
+    /// 执行=下指令并盯到结果），返回直接回给手表的字典。
+    var onCloseAllPrep: (() async -> [String: Any])?
+    var onCloseAll: (() async -> [String: Any])?
+
     private override init() {
         super.init()
     }
@@ -46,7 +51,23 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         didReceiveMessage message: [String: Any],
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
-        guard (message["command"] as? String) == "setGrid",
+        let command = message["command"] as? String
+        if command == "closeAllPrep" || command == "closeAll" {
+            nonisolated(unsafe) let reply = replyHandler
+            let isPrep = command == "closeAllPrep"
+            Task { @MainActor in
+                let handler = isPrep
+                    ? WatchBridge.shared.onCloseAllPrep
+                    : WatchBridge.shared.onCloseAll
+                guard let handler else {
+                    reply(["ok": false, "message": "手机端还没准备好"])
+                    return
+                }
+                reply(await handler())
+            }
+            return
+        }
+        guard command == "setGrid",
               let step = (message["step"] as? NSNumber)?.doubleValue,
               let perSide = (message["perSide"] as? NSNumber)?.intValue else {
             replyHandler(["ok": false, "message": "指令格式不对"])

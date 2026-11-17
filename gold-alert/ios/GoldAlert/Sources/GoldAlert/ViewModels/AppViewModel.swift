@@ -75,6 +75,14 @@ final class AppViewModel: ObservableObject {
             await self?.handleWatchSetGrid(step: step, perSide: perSide)
                 ?? (false, "手机端还没准备好")
         }
+        WatchBridge.shared.onCloseAllPrep = { [weak self] in
+            await self?.handleWatchCloseAllPrep()
+                ?? ["ok": false, "message": "手机端还没准备好"]
+        }
+        WatchBridge.shared.onCloseAll = { [weak self] in
+            await self?.handleWatchCloseAll()
+                ?? ["ok": false, "message": "手机端还没准备好"]
+        }
     }
 
     func onAppear() {
@@ -316,6 +324,65 @@ final class AppViewModel: ObservableObject {
             persistState()
             showToast(error.localizedDescription, error: true)
         }
+    }
+
+    /// 手表一键全平·准备：查 EA 是否在线、当前有多少持仓，
+    /// 供手表在确认页上显示（持仓数来自 EA 同步上报，服务器没部署
+    /// 新版或 EA 没重启前为 -1，手表显示「未知」）。
+    func handleWatchCloseAllPrep() async -> [String: Any] {
+        guard isUnlocked, !token.isEmpty else {
+            return ["ok": false, "message": "手机端未解锁，先在手机上打开提醒事项"]
+        }
+        do {
+            let status = try await CloudflareClient.shared.getStatus(baseURL: baseURL, token: token)
+            return [
+                "ok": true,
+                "eaOnline": status.ea_online == true,
+                "positions": status.positions_count ?? -1,
+            ]
+        } catch {
+            return ["ok": false, "message": "查不到 EA 状态"]
+        }
+    }
+
+    /// 手表一键全平·执行：向服务器下一次性指令，然后每秒轮询
+    /// /api/status 的 last_command 直到出结果（最长约 25 秒）。
+    /// 三种结局分开报：执行完成 / 指令过期 / 已发送但结果未回
+    /// （状态未知，不能假装失败）。
+    func handleWatchCloseAll() async -> [String: Any] {
+        guard isUnlocked, !token.isEmpty else {
+            return ["ok": false, "message": "手机端未解锁，先在手机上打开提醒事项"]
+        }
+        let cmd: CommandResponse
+        do {
+            cmd = try await CloudflareClient.shared.sendCloseAllCommand(baseURL: baseURL, token: token)
+        } catch {
+            return ["ok": false, "message": "指令没发出去，检查手机网络"]
+        }
+        guard let cmdId = cmd.id else {
+            return ["ok": false, "message": "服务器没受理指令"]
+        }
+        if cmd.ea_online == false {
+            return ["ok": false, "message": "EA 不在线，指令没人执行"]
+        }
+        for _ in 0..<25 {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let status = try? await CloudflareClient.shared.getStatus(baseURL: baseURL, token: token),
+                  let last = status.last_command, last.id == cmdId else { continue }
+            switch last.state {
+            case "done":
+                var text = "已平 \(last.closed ?? 0) 单"
+                if let f = last.failed, f > 0 { text += " · \(f) 单失败" }
+                if let p = last.profit { text += " · \(p >= 0 ? "+" : "")\(String(format: "%.2f", p))" }
+                if let e = last.error, !e.isEmpty { text += " · \(e)" }
+                return ["ok": true, "message": text]
+            case "expired":
+                return ["ok": false, "message": "指令过期，EA 没领到"]
+            default:
+                continue
+            }
+        }
+        return ["ok": false, "message": "已发送，结果未回（请看 MT5）"]
     }
 
     /// 手表端发来的设定指令（ren 2026-11-15 定：执行留在手机上）：

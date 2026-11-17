@@ -119,6 +119,111 @@ final class WatchModel: NSObject, ObservableObject {
         })
     }
 
+    // MARK: - 一键全平（第三页）
+
+    enum CloseAllPhase {
+        case idle
+        case prepping
+        case confirm(positions: Int, eaOnline: Bool)
+        case sending
+        case result(text: String, isError: Bool)
+    }
+
+    @Published var closeAllPhase: CloseAllPhase = .idle
+    private var closeAllResetTask: Task<Void, Never>?
+
+    /// 点「全部平仓」：先向手机问 EA 在线状态与当前持仓数，进确认态。
+    /// 手机不可达时直接进结果态报错，不假装能平。
+    func closeAllPrep() {
+        guard let session = reachableSession() else {
+            closeAllPhase = .result(text: "手机不在附近或未连接", isError: true)
+            scheduleCloseAllReset()
+            return
+        }
+        closeAllPhase = .prepping
+        session.sendMessage(["command": "closeAllPrep"], replyHandler: { [weak self] reply in
+            let ok = reply["ok"] as? Bool ?? false
+            Task { @MainActor in
+                guard let self else { return }
+                if ok {
+                    let positions = (reply["positions"] as? NSNumber)?.intValue ?? -1
+                    let online = reply["eaOnline"] as? Bool ?? false
+                    self.closeAllPhase = .confirm(positions: positions, eaOnline: online)
+                } else {
+                    self.closeAllPhase = .result(
+                        text: reply["message"] as? String ?? "准备失败", isError: true)
+                    self.scheduleCloseAllReset()
+                }
+            }
+        }, errorHandler: { [weak self] error in
+            Task { @MainActor in
+                self?.closeAllPhase = .result(
+                    text: "发送失败：\(error.localizedDescription)", isError: true)
+                self?.scheduleCloseAllReset()
+            }
+        })
+    }
+
+    func closeAllCancel() {
+        closeAllPhase = .idle
+    }
+
+    /// 确认后执行：手机下指令并盯到 EA 出结果才回话（最长约半分钟），
+    /// 回复到达即结果。errorHandler 触发多半是等待过久——指令可能已
+    /// 执行，结果未知，文案如实说「已发送，结果未回」，不报失败。
+    func closeAllConfirm() {
+        guard let session = reachableSession() else {
+            closeAllPhase = .result(text: "手机不在附近或未连接", isError: true)
+            scheduleCloseAllReset()
+            return
+        }
+        closeAllPhase = .sending
+        session.sendMessage(["command": "closeAll"], replyHandler: { [weak self] reply in
+            let ok = reply["ok"] as? Bool ?? false
+            let text = reply["message"] as? String ?? (ok ? "已执行" : "失败")
+            Task { @MainActor in
+                self?.closeAllPhase = .result(text: text, isError: !ok)
+                self?.scheduleCloseAllReset()
+            }
+        }, errorHandler: { [weak self] _ in
+            Task { @MainActor in
+                self?.closeAllPhase = .result(text: "已发送，结果未回（请看 MT5）", isError: true)
+                self?.scheduleCloseAllReset()
+            }
+        })
+    }
+
+    /// 放下手腕时把确认/结果态收回待机（发送中、准备中不打断，等回复落定）。
+    func closeAllPageReset() {
+        switch closeAllPhase {
+        case .confirm, .result:
+            closeAllResetTask?.cancel()
+            closeAllPhase = .idle
+        default:
+            break
+        }
+    }
+
+    private func reachableSession() -> WCSession? {
+        guard WCSession.isSupported() else { return nil }
+        let session = WCSession.default
+        phoneReachable = session.isReachable
+        guard session.activationState == .activated, session.isReachable else { return nil }
+        return session
+    }
+
+    /// 结果态停留约 6 秒后自动回待机态。
+    private func scheduleCloseAllReset() {
+        closeAllResetTask?.cancel()
+        closeAllResetTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            if Task.isCancelled { return }
+            if let phase = self?.closeAllPhase, case .result = phase {
+                self?.closeAllPhase = .idle
+            }
+        }
+    }
+
     static func formatStep(_ step: Double) -> String {
         String(format: "%.0f", step)
     }

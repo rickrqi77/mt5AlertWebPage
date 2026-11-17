@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// 手表端界面分两页（ren 2026-11-15 定），竖向分页、上滑（或转表冠）翻页：
+/// 手表端界面分三页，竖向分页、上滑（或转表冠）翻页
+///（第三页一键全平为 2026-11-18 新增，前两页维持 ren 2026-11-15 定版）：
 /// 第一页是时钟页——日期在上、时间在下，居中显示，尺寸适配表盘；
 /// 底部中间只显示金价整数的末两位（如 4019 显示 19），字号 20
 ///（原 15，ren 2026-11-17 要求加大一点）。
@@ -25,6 +26,8 @@ struct WatchRootView: View {
                 .tag(0)
             settingsPage
                 .tag(1)
+            closeAllPage
+                .tag(2)
         }
         .tabViewStyle(.page)
         .onAppear { model.startAutoRefresh() }
@@ -38,6 +41,7 @@ struct WatchRootView: View {
                 model.startAutoRefresh()
             } else {
                 model.stopAutoRefresh()
+                model.closeAllPageReset()
                 resetToClockPage()
             }
         }
@@ -260,6 +264,77 @@ struct WatchRootView: View {
                 }
             }
         }
+    }
+
+    // MARK: - 第三页：一键全平
+
+    /// 一键全平单独一页（不挤设定页）：点「全部平仓」先向手机确认
+    /// EA 在线与持仓数，再点「确认全平」才真正下指令；结果由手机
+    /// 盯到 EA 执行完才回话。放下手腕会把确认/结果态收回待机。
+    private var closeAllPage: some View {
+        VStack(spacing: 8) {
+            Text("一键全平")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            switch model.closeAllPhase {
+            case .idle:
+                closeAllButton(title: "全部平仓", enabled: true) {
+                    model.closeAllPrep()
+                }
+                Text("平掉账户全部持仓")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            case .prepping:
+                ProgressView()
+                Text("正在向手机确认持仓…")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            case .confirm(let positions, let eaOnline):
+                Text(positions >= 0 ? "当前 \(positions) 单" : "持仓数未知")
+                    .font(.system(size: 17, weight: .semibold))
+                if !eaOnline {
+                    Text("EA 不在线，平不了")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+                closeAllButton(title: "确认全平", enabled: eaOnline) {
+                    model.closeAllConfirm()
+                }
+                Button("取消") { model.closeAllCancel() }
+                    .font(.caption)
+            case .sending:
+                ProgressView()
+                Text("平仓中…")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            case .result(let text, let isError):
+                Text(text)
+                    .font(.caption)
+                    .foregroundStyle(isError ? .red : .green)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(.horizontal, 6)
+    }
+
+    private func closeAllButton(
+        title: String,
+        enabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 17, weight: .bold))
+                .frame(maxWidth: .infinity, minHeight: 44, maxHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.red.opacity(enabled ? 1 : 0.4))
+        )
+        .foregroundStyle(.white)
+        .disabled(!enabled)
     }
 
     private func chip(
