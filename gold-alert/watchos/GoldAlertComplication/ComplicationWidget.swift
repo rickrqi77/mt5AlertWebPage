@@ -35,9 +35,17 @@ struct ComplicationView: View {
 
     /// 固定显示数字「8」，不显示价格、不显示图标（ren 2026-11-18 定）。
     /// 字号按样式给：矩形位最大、圆形次之、边角与行内较小。
+    /// 背景用系统标准复杂功能底 AccessoryWidgetBackground（灰黑色，
+    /// 与其他复杂功能一致，ren 2026-11-18 要求）；行内样式没有底、
+    /// 不加。构建 26 前没加这层底，「8」是直接浮在表盘上的。
     var body: some View {
-        Text("8")
-            .font(.system(size: fontSize, weight: .semibold))
+        ZStack {
+            if family != .accessoryInline {
+                AccessoryWidgetBackground()
+            }
+            Text("8")
+                .font(.system(size: fontSize, weight: .semibold))
+        }
     }
 
     private var fontSize: CGFloat {
