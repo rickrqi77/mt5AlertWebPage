@@ -9,10 +9,10 @@ struct AlertRowView: View {
     /// 日元模式下盈亏只显示整数、不带小数（ren 2026-10-30：日元收益金额大、
     /// MT5 本身也只显示整数日元）；美元模式仍显示两位小数。
     let pnlInteger: Bool
-    /// 是否是当前页的第一行：是则在行上方也画一条分割线（顶线）。
-    /// 按页判断而非全表第 0 行——第二页首行（全表第 9 行）同样需要顶线，
-    /// 构建 24 前用全表下标判断，第二页一直缺这条线。
-    var isFirstInPage: Bool = false
+    /// 是否在行上方画顶部分割线：只有列表第一行需要（每行下方一条线、
+    /// 第一行上方再补一条，ren 2026-10-28 定）。分页时代（构建 25）曾
+    /// 按每页首行画，改回一页内滚动后回到全表第一行。
+    var showsTopDivider: Bool = false
     let onPriceChange: (String) -> Void
     let onToggleArm: () -> Void
 
@@ -39,7 +39,7 @@ struct AlertRowView: View {
 
             // 价格数字：无背景框，与背景同色（整行不要独立底色，ren 23:10 定版）。
             // 改价只靠点开编辑：整行左右滑调价已删除（ren 2026-11-17 定），
-            // 左右滑改由列表层翻页（见 MainView 的 pageSwipeGesture）。
+            // 行上不挂任何拖动手势，列表滚动（构建 26 起）无手势争抢。
             SelectAllPriceField(text: priceBinding)
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
@@ -74,7 +74,7 @@ struct AlertRowView: View {
         .padding(.vertical, 6)
         // 行底色与画面背景同色（appBackground：深色黑，浅色略压亮度的浅灰）。
         .background(Color.appBackground)
-        // 行间分割线（ren 2026-10-28 要求）：每一行下方画一条线，每页的
+        // 行间分割线（ren 2026-10-28 要求）：每一行下方画一条线，列表
         // 第一行上方也画一条（最后一行下方的线就是它自己的底线）。用
         // overlay 画，不占布局尺寸，不影响行高。
         .overlay(alignment: .bottom) {
@@ -83,7 +83,7 @@ struct AlertRowView: View {
                 .frame(height: 1)
         }
         .overlay(alignment: .top) {
-            if isFirstInPage {
+            if showsTopDivider {
                 Rectangle()
                     .fill(Color.primary.opacity(0.25))
                     .frame(height: 1)
