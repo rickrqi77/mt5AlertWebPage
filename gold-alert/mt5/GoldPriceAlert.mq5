@@ -7,8 +7,10 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Alert System"
 #property link      ""
-#property version   "1.17"
-#property description "XAUUSD gold price alert EA. One request sends price and alert usage, and receives saved alerts. Telegram sent by the EA."
+#property version   "1.18"
+#property description "XAUUSD gold price alert EA. One request sends price and alert usage, and receives saved alerts. Telegram sent by the EA. Also executes one-shot close-all commands from the watch app (close only, never opens positions)."
+
+#include <Trade/Trade.mqh>
 
 //--- inputs
 input string InpApiBaseUrl      = "https://alertdata.pages.dev";      // Cloudflare site, no trailing slash
@@ -49,16 +51,21 @@ datetime   g_lastSyncLocal  = 0;
 datetime   g_lastErrorLog   = 0;
 bool       g_filePaused     = false;
 int        g_syncSeconds    = 0;
+long       g_lastCmdId      = 0;   // Last executed close_all command id (persisted via terminal global variables)
 
 int  ResolveSyncSeconds();
 bool ApplySyncInterval(const bool startup);
+void ExecuteCloseAll(const int cmdId);
+void ReportCommandResult(const int cmdId, const int closed, const int failed,
+                         const double profit, const string err);
+string EscapeJson(const string s);
 
 //+------------------------------------------------------------------+
 //| Expert initialization                                            |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print(LOG_PREFIX, "EA initialized v1.17");
+   Print(LOG_PREFIX, "EA initialized v1.18");
    if(InpEnableTelegram && StringLen(InpTelegramBotToken) > 0 && StringLen(InpTelegramChatId) > 0)
       Print(LOG_PREFIX, "Telegram: on (direct, not via Cloudflare)");
    else
@@ -81,6 +88,9 @@ int OnInit()
       Print(LOG_PREFIX, "WARNING: SymbolSelect failed for ", g_symbol);
 
    ResetAlerts();
+
+   if(GlobalVariableCheck("GoldAlert.LastCmdId"))
+      g_lastCmdId = (long)GlobalVariableGet("GoldAlert.LastCmdId");
 
    if(!ApplySyncInterval(true))
       return(INIT_FAILED);
@@ -530,6 +540,7 @@ bool SyncOnce(const double bid, const double ask, const double currentPrice)
    body += ",\"price\":" + DoubleToString(currentPrice, PriceDigits());
    body += ",\"version\":" + IntegerToString(g_configVersion);
    body += ",\"interval\":" + IntegerToString(g_syncSeconds);
+   body += ",\"positions\":" + IntegerToString(PositionsTotal());
    body += ",\"alerts\":[";
    bool first = true;
    for(int i = 0; i < g_alertCount; i++)
@@ -567,6 +578,13 @@ bool SyncOnce(const double bid, const double ask, const double currentPrice)
       LogErrorThrottled("ERROR: JSON parse failed (version)");
       return false;
    }
+
+   // Close-all command (rides this sync response as a flat field).
+   // Checked before the version early-return below: a command must be
+   // picked up even when the alert config has not changed.
+   int closeAllId = JsonGetInt(resp, "close_all_id", 0);
+   if(closeAllId > 0 && closeAllId > (int)g_lastCmdId)
+      ExecuteCloseAll(closeAllId);
 
    if(version == g_configVersion && g_alertCount >= 0 && g_configVersion >= 0)
       return true;
@@ -678,6 +696,86 @@ bool SyncOnce(const double bid, const double ask, const double currentPrice)
    }
 
    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Close-all command from the watch app (via the server).           |
+//| One-shot: the command id is persisted before reporting, so a     |
+//| restart or a repeated response can never execute it twice.       |
+//| This EA can only CLOSE positions — there is no open-order code.  |
+//+------------------------------------------------------------------+
+void ExecuteCloseAll(const int cmdId)
+{
+   int    closed = 0;
+   int    failed = 0;
+   double profit = 0.0;
+   string err    = "";
+   int    total  = PositionsTotal();
+
+   if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))
+   {
+      failed = total;
+      err = "MT5 算法交易未开启";
+   }
+   else if(!MQLInfoInteger(MQL_TRADE_ALLOWED))
+   {
+      failed = total;
+      err = "EA 交易未允许";
+   }
+   else
+   {
+      CTrade trade;
+      trade.SetDeviationInPoints(50);
+      for(int i = total - 1; i >= 0; i--)
+      {
+         ulong ticket = PositionGetTicket(i);
+         if(ticket == 0)
+            continue;
+         double p = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+         trade.SetTypeFillingBySymbol(PositionGetString(POSITION_SYMBOL));
+         if(trade.PositionClose(ticket))
+         {
+            closed++;
+            profit += p;
+         }
+         else
+         {
+            failed++;
+            if(StringLen(err) == 0)
+               err = trade.ResultRetcodeDescription();
+         }
+      }
+   }
+
+   g_lastCmdId = cmdId;
+   GlobalVariableSet("GoldAlert.LastCmdId", (double)cmdId);
+
+   Print(LOG_PREFIX, "CloseAll #", cmdId, ": closed=", closed,
+         " failed=", failed, " profit=", DoubleToString(profit, 2),
+         StringLen(err) > 0 ? " err=" + err : "");
+
+   ReportCommandResult(cmdId, closed, failed, profit, err);
+}
+
+//+------------------------------------------------------------------+
+//| Report a close-all result via a minimal sync POST                |
+//+------------------------------------------------------------------+
+void ReportCommandResult(const int cmdId, const int closed, const int failed,
+                         const double profit, const string err)
+{
+   string body = "{\"command_result\":{";
+   body += "\"id\":" + IntegerToString(cmdId);
+   body += ",\"closed\":" + IntegerToString(closed);
+   body += ",\"failed\":" + IntegerToString(failed);
+   body += ",\"profit\":" + DoubleToString(profit, 2);
+   body += ",\"error\":\"" + EscapeJson(err) + "\"";
+   body += "}}";
+
+   string url = NormalizeBaseUrl() + "/api/ea/sync";
+   string resp;
+   int status;
+   if(!HttpRequest("POST", url, body, resp, status))
+      Print(LOG_PREFIX, "ERROR: CloseAll result report failed (id=", cmdId, ")");
 }
 
 //+------------------------------------------------------------------+
