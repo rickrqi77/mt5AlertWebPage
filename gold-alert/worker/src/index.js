@@ -15,6 +15,80 @@ const SWISSQUOTE_XAU_URL =
 
 let usageColumnsReady = false;
 let syncSecondsReady = false;
+let commandsTableReady = false;
+let positionsColumnReady = false;
+
+const COMMAND_TTL_SECONDS = 30;
+
+async function ensureCommandsTable(env) {
+  if (commandsTableReady) return;
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS commands (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      type TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      executed_at TEXT,
+      result TEXT
+    )`
+  ).run();
+  commandsTableReady = true;
+}
+
+async function ensurePositionsColumn(env) {
+  if (positionsColumnReady) return;
+  try {
+    await env.DB.prepare("SELECT positions_count FROM system_status WHERE id = 1").first();
+  } catch {
+    try {
+      await env.DB.prepare(
+        "ALTER TABLE system_status ADD COLUMN positions_count INTEGER"
+      ).run();
+    } catch {
+      /* column already exists */
+    }
+  }
+  positionsColumnReady = true;
+}
+
+/// The newest close_all command still waiting for the EA, or null.
+/// An expired pending command is marked expired on sight so it can
+/// never be picked up and executed late.
+async function pendingCloseAll(env) {
+  await ensureCommandsTable(env);
+  const row = await env.DB.prepare(
+    "SELECT id, expires_at FROM commands WHERE type = 'close_all' AND state = 'pending' ORDER BY id DESC LIMIT 1"
+  ).first();
+  if (!row) return null;
+  if (Date.parse(row.expires_at) <= Date.now()) {
+    await env.DB.prepare("UPDATE commands SET state = 'expired' WHERE id = ?")
+      .bind(row.id)
+      .run();
+    return null;
+  }
+  return row;
+}
+
+async function recordCommandResult(env, result) {
+  await ensureCommandsTable(env);
+  const id = Number(result.id);
+  const row = await env.DB.prepare("SELECT state FROM commands WHERE id = ?")
+    .bind(id)
+    .first();
+  if (!row || row.state !== "pending") return;
+  const payload = {
+    closed: Number.isFinite(Number(result.closed)) ? Number(result.closed) : 0,
+    failed: Number.isFinite(Number(result.failed)) ? Number(result.failed) : 0,
+    profit: Number.isFinite(Number(result.profit)) ? Number(result.profit) : 0,
+    error: String(result.error || "").slice(0, 200),
+  };
+  await env.DB.prepare(
+    "UPDATE commands SET state = 'done', executed_at = ?, result = ? WHERE id = ?"
+  )
+    .bind(new Date().toISOString(), JSON.stringify(payload), id)
+    .run();
+}
 
 async function ensureSyncSecondsColumn(env) {
   if (syncSecondsReady) return;
@@ -144,6 +218,9 @@ async function handleApi(request, env, url) {
   if (method === "POST" && path === "/api/pause") {
     return await setPause(request, env);
   }
+  if (method === "POST" && path === "/api/command") {
+    return await createCommand(request, env);
+  }
 
   return json({ error: "Not found" }, 404);
 }
@@ -230,7 +307,12 @@ async function checkAuth(request, env) {
 
 async function getStatus(env) {
   await ensureSyncSecondsColumn(env);
+  await ensurePositionsColumn(env);
+  await ensureCommandsTable(env);
   const status = await env.DB.prepare("SELECT * FROM system_status WHERE id = 1").first();
+  const lastCmd = await env.DB.prepare(
+    "SELECT id, type, state, created_at, expires_at, executed_at, result FROM commands ORDER BY id DESC LIMIT 1"
+  ).first();
   const settings = await env.DB.prepare(
     "SELECT step, telegram_enabled, alerts_enabled FROM settings WHERE id = 1"
   ).first();
@@ -257,6 +339,18 @@ async function getStatus(env) {
     paused: settings?.alerts_enabled === 0,
     config_version: status?.config_version ?? 1,
     sync_seconds: status?.sync_seconds || 3,
+    positions_count: status?.positions_count ?? null,
+    last_command: lastCmd
+      ? {
+          id: lastCmd.id,
+          type: lastCmd.type,
+          state: lastCmd.state,
+          created_at: lastCmd.created_at,
+          expires_at: lastCmd.expires_at,
+          executed_at: lastCmd.executed_at,
+          result: lastCmd.result ? JSON.parse(lastCmd.result) : null,
+        }
+      : null,
   });
 }
 
@@ -656,6 +750,22 @@ async function eaSync(request, env) {
   const interval = Number(body.interval);
   const syncSeconds = Number.isInteger(interval) && interval >= 3 && interval <= 3600 ? interval : null;
   await ensureSyncSecondsColumn(env);
+  await ensurePositionsColumn(env);
+
+  // EA reports its open-position count with every sync (the watch app
+  // shows it on the close-all confirmation screen).
+  const positions = Number(body.positions);
+  if (Number.isInteger(positions) && positions >= 0) {
+    await env.DB.prepare("UPDATE system_status SET positions_count = ? WHERE id = 1")
+      .bind(positions)
+      .run();
+  }
+
+  // EA reports the outcome of a close_all command it executed. Handled
+  // before anything else so the response below already reflects it.
+  if (body.command_result && Number.isFinite(Number(body.command_result.id))) {
+    await recordCommandResult(env, body.command_result);
+  }
 
   if (Number.isFinite(price) && price > 0) {
     if (syncSeconds != null) {
@@ -754,6 +864,8 @@ async function getConfig(env) {
     results = q.results || [];
   }
 
+  const pending = await pendingCloseAll(env);
+
   return json({
     symbol: status?.symbol || "XAUUSD",
     alerts_enabled: alertsEnabled,
@@ -764,6 +876,9 @@ async function getConfig(env) {
     })),
     version: status?.config_version ?? 1,
     usage_request: status?.usage_request || 0,
+    // Flat field on purpose: the EA's JSON reader scans top-level keys,
+    // a nested object would collide with the alert rows' own "id"s.
+    close_all_id: pending ? pending.id : 0,
   });
 }
 
@@ -932,6 +1047,52 @@ async function setPause(request, env) {
     paused,
     alerts_enabled: !paused,
     message: paused ? "提醒已暂停" : "提醒已恢复",
+  });
+}
+
+async function createCommand(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+  if (String(body.type || "") !== "close_all") {
+    return json({ error: "Unsupported command type" }, 400);
+  }
+
+  await ensureCommandsTable(env);
+  const status = await env.DB.prepare(
+    "SELECT last_seen FROM system_status WHERE id = 1"
+  ).first();
+  const eaOnline = isEaOnline(status?.last_seen);
+
+  // One live command at a time: a repeat tap returns the same command
+  // instead of stacking a second one.
+  const existing = await pendingCloseAll(env);
+  if (existing) {
+    return json({
+      ok: true,
+      id: existing.id,
+      expires_at: existing.expires_at,
+      ea_online: eaOnline,
+      reused: true,
+    });
+  }
+
+  const now = new Date();
+  const expires = new Date(now.getTime() + COMMAND_TTL_SECONDS * 1000);
+  const res = await env.DB.prepare(
+    "INSERT INTO commands (type, state, created_at, expires_at) VALUES ('close_all', 'pending', ?, ?)"
+  )
+    .bind(now.toISOString(), expires.toISOString())
+    .run();
+
+  return json({
+    ok: true,
+    id: res.meta.last_row_id,
+    expires_at: expires.toISOString(),
+    ea_online: eaOnline,
   });
 }
 
