@@ -88,6 +88,16 @@ struct WatchRootView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        // 右下角热区：双击直接跳第三页平仓画面（ren 2026-11-18 定）。
+        // 热区透明、无单击动作，不影响时钟页任何显示与手势。
+        .overlay(alignment: .bottomTrailing) {
+            Color.clear
+                .frame(width: 90, height: 70)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    selectedPage = 2
+                }
+        }
     }
 
     /// 金价整数部分的末两位（4019.x → "19"，4005.x → "05"）；还没取到价显示 "--"。
@@ -268,9 +278,10 @@ struct WatchRootView: View {
 
     // MARK: - 第三页：一键全平
 
-    /// 一键全平单独一页（不挤设定页）：点「全部平仓」先向手机确认
-    /// EA 在线与持仓数，再点「确认全平」才真正下指令；结果由手机
-    /// 盯到 EA 执行完才回话。放下手腕会把确认/结果态收回待机。
+    /// 一键全平单独一页（不挤设定页）：点「全部平仓」只进确认态、
+    /// 不取任何数据；点「确认全平」即把指令发给手机、立刻显示
+    /// 已发送，不等结果（ren 2026-11-18 改定）。放下手腕会把
+    /// 确认/结果态收回待机。
     private var closeAllPage: some View {
         VStack(spacing: 8) {
             Text("一键全平")
@@ -279,35 +290,20 @@ struct WatchRootView: View {
             switch model.closeAllPhase {
             case .idle:
                 closeAllButton(title: "全部平仓", enabled: true) {
-                    model.closeAllPrep()
+                    model.closeAllAskConfirm()
                 }
                 Text("平掉账户全部持仓")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-            case .prepping:
-                ProgressView()
-                Text("正在向手机确认持仓…")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            case .confirm:
+                Text("确认平掉全部持仓？")
+                    .font(.system(size: 15, weight: .semibold))
                     .multilineTextAlignment(.center)
-            case .confirm(let positions, let eaOnline):
-                Text(positions >= 0 ? "当前 \(positions) 单" : "持仓数未知")
-                    .font(.system(size: 17, weight: .semibold))
-                if !eaOnline {
-                    Text("EA 不在线，平不了")
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                }
-                closeAllButton(title: "确认全平", enabled: eaOnline) {
+                closeAllButton(title: "确认全平", enabled: true) {
                     model.closeAllConfirm()
                 }
                 Button("取消") { model.closeAllCancel() }
                     .font(.caption)
-            case .sending:
-                ProgressView()
-                Text("平仓中…")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             case .result(let text, let isError):
                 Text(text)
                     .font(.caption)

@@ -13,9 +13,8 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// 入参 (间隔, 每边档数)，返回 (是否成功, 给手表显示的结果文案)。
     var onSetGridCommand: ((Double, Int) async -> (Bool, String))?
 
-    /// 手表一键全平的两个处理者（准备=查 EA 在线与持仓数；
-    /// 执行=下指令并盯到结果），返回直接回给手表的字典。
-    var onCloseAllPrep: (() async -> [String: Any])?
+    /// 手表一键全平的处理者（下指令即返回，不等 EA 结果），
+    /// 返回直接回给手表的字典。
     var onCloseAll: (() async -> [String: Any])?
 
     private override init() {
@@ -52,14 +51,10 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         replyHandler: @escaping ([String: Any]) -> Void
     ) {
         let command = message["command"] as? String
-        if command == "closeAllPrep" || command == "closeAll" {
+        if command == "closeAll" {
             nonisolated(unsafe) let reply = replyHandler
-            let isPrep = command == "closeAllPrep"
             Task { @MainActor in
-                let handler = isPrep
-                    ? WatchBridge.shared.onCloseAllPrep
-                    : WatchBridge.shared.onCloseAll
-                guard let handler else {
+                guard let handler = WatchBridge.shared.onCloseAll else {
                     reply(["ok": false, "message": "手机端还没准备好"])
                     return
                 }
