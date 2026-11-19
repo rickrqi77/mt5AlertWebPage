@@ -155,47 +155,36 @@ enum MT5ScreenshotParser {
             }
         }
 
-        // 第二步：收集全部价对（「开仓价 → 现价」的左价与右价），保持行序；
-        // 同一行有多个箭头价对时逐个收。
-        var priceEntries: [(index: Int, entry: Double, current: Double)] = []
-        for (index, line) in lines.enumerated() {
-            for pair in entryPricePairs(inLine: line) {
-                priceEntries.append((index: index, entry: pair.entry, current: pair.current))
-            }
-        }
-
-        // 笔数对齐检查（第一道防线，2026-11-19）：识别到的持仓行数与价格行数
-        // 必须相等。OCR 漏掉一行价格时顺序配对会整体顺移、最后一笔被挤掉
-        // （三笔 sell 0.1 只读出两笔、均价手数全错的实报即此），宁可整次
-        // 作废保留旧数据，也不能让错位的数据静默写进去。
-        guard starts.count == priceEntries.count else {
-            throw AppError.message("截图持仓对不上，这次没采用")
-        }
-
-        // 第三步：按顺序一一配对——第 k 笔持仓取它品种行之后（含本行）、还没被
-        // 前面持仓用掉的第一条价格。旧做法「品种行后 4 行窗口里找价格」在
-        // Vision 行序交错时会整笔漏掉：2026-10-30 ren 截图（两笔 sell 0.05
-        // @4019.91/@4025.39）只读出一笔，合计手数 0.10 变 0.05、平均价只剩
-        // 第一笔的开仓价，因第二笔的价格行落在了窗口外。配对只按先后顺序，
-        // 不按内容去重：同方向同手数的重复行就是多笔真实订单（2026-10-28
-        // dedupe 误杀的教训同样适用）。
-        var used = Set<Int>()
+        // 第二步：逐笔在自己的区块内取价对（2026-11-19 重构）。区块 =
+        // 本笔品种行到下一笔品种行之前。区块内按出现顺序遇到的前两个
+        // 黄金价位就是开仓价与现价——不依赖箭头符号是否被 OCR 认出、
+        // 不依赖价格行有没有被拆成两行。旧做法（全局收集价对再顺序
+        // 配对）在 ren 的手机上反复栽在同一处：一行价格认不成对时
+        // 后面整体顺移，先是写错均价/手数，改加笔数校验后又变成整次
+        // 作废、识别像坏了。区块内不足两个价位才整次作废（保留旧数据）。
+        // 区块从品种行开始，账户区的结余/净值等大数字在第一笔之前，
+        // 不会落进任何区块；盈亏数字（如 106.40）不在黄金价位区间，
+        // 也不会被误收。
         var positions: [GoldPosition] = []
         var currents: [Double] = []
-        for start in starts {
-            guard let found = priceEntries.enumerated().first(where: {
-                $0.element.index >= start.index && !used.contains($0.offset)
-            }) else { continue }
-            used.insert(found.offset)
+        for (k, start) in starts.enumerated() {
+            let blockEnd = k + 1 < starts.count ? starts[k + 1].index : lines.count
+            var prices: [Double] = []
+            for line in lines[start.index..<blockEnd] {
+                prices.append(contentsOf: goldPrices(inLine: line))
+            }
+            guard prices.count >= 2 else {
+                throw AppError.message("截图持仓对不上，这次没采用")
+            }
             positions.append(
                 GoldPosition(
                     symbol: start.symbol,
                     side: start.side,
                     lots: start.lots,
-                    entryPrice: found.element.entry
+                    entryPrice: prices[0]
                 )
             )
-            currents.append(found.element.current)
+            currents.append(prices[1])
         }
         return (positions, currents)
     }
@@ -243,30 +232,28 @@ enum MT5ScreenshotParser {
         }
     }
 
-    /// 一行里全部 `开仓价 → 现价` 价对（通常一个）：左开仓价、右现价。
-    /// Do not treat the hyphen inside `GOLD24-7` as a price arrow.
-    private static func entryPricePairs(
-        inLine line: String
-    ) -> [(entry: Double, current: Double)] {
-        // Both sides must look like gold prices (3+ digits). No bare "-" (breaks GOLD24-7).
-        let arrow = try! NSRegularExpression(
-            pattern: #"([0-9]{3,}(?:\.[0-9]+)?)\s*(?:→|->|➜|⇒|—|–|>|›|»|\s-\s)\s*([0-9]{3,}(?:\.[0-9]+)?)"#
+    /// 一行里全部黄金价位（500–20000），按出现顺序。带数字修复：
+    /// OCR 常把 0 认成 O、1 认成 l/I（如 3724.9O），只对「数字开头、
+    /// 含小数点」的价格形 token 做替换，修完能解析且落在黄金价位
+    /// 区间才收。手数（0.1）、盈亏（106.40）不在区间内，天然排除。
+    private static func goldPrices(inLine line: String) -> [Double] {
+        let tokenPattern = try! NSRegularExpression(
+            pattern: #"[0-9][0-9OIl]*(?:\.[0-9OIl]+)?"#
         )
         let ns = line as NSString
         let full = NSRange(location: 0, length: ns.length)
-        var result: [(entry: Double, current: Double)] = []
-        for pm in arrow.matches(in: line, options: [], range: full) where pm.numberOfRanges >= 3 {
-            let left = Double(ns.substring(with: pm.range(at: 1))) ?? 0
-            let right = Double(ns.substring(with: pm.range(at: 2))) ?? 0
-            if isGoldPrice(left), isGoldPrice(right) {
-                result.append((entry: left, current: right))
+        var result: [Double] = []
+        for match in tokenPattern.matches(in: line, options: [], range: full) {
+            var token = ns.substring(with: match.range)
+            token = token
+                .replacingOccurrences(of: "O", with: "0")
+                .replacingOccurrences(of: "I", with: "1")
+                .replacingOccurrences(of: "l", with: "1")
+            if let value = Double(token), isGoldPrice(value) {
+                result.append(value)
             }
         }
-        if !result.isEmpty { return result }
-        // No arrow glyph: two gold-range prices on one line → left is entry, right is current.
-        let prices = allNumbers(in: line).filter(isGoldPrice)
-        if prices.count >= 2 { return [(entry: prices[0], current: prices[1])] }
-        return []
+        return result
     }
 
     private static func isGoldPrice(_ value: Double) -> Bool {
