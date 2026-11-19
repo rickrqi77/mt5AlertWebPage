@@ -26,25 +26,24 @@ struct MainView: View {
         .padding(.top, 8)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // 打开画面即开始持续识别：立刻认最新截图，之后每 3 秒查有
-        // 没有新截图、有就认（ren 2026-11-19 要求：识别成功后不要
-        // 停，直到他划出去；划回来重新开始）。找不到/图不对静默。
+        // 截图解析只在打开画面、或从别处切换回 app 时各做一次：
+        // 取最新截图解析；其他时候不取不解析（ren 2026-11-19 改定，
+        // 持续识别已取消）。找不到/图不对静默。
         .task {
-            liquidation.startContinuousRecognition()
+            await liquidation.autoCalculateFromLatestScreenshot()
             // 日元模式下每行盈亏数字要用美日实时汇率，打开画面时先刷一次。
             if liquidation.mode == .jpy { await liquidation.refreshUSDJPYRate() }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
                 // 回到前台：价格循环重启并立刻先取一次价刷新显示，
-                // 不等间隔（ren 2026-11-19 要求，手机/手表同口径）。
+                // 不等间隔（ren 2026-11-19 要求，手机/手表同口径）；
+                // 截图也在这时取最新一张解析一次。
                 model.onAppear()
-                liquidation.startContinuousRecognition()
-                if liquidation.mode == .jpy {
-                    Task { await liquidation.refreshUSDJPYRate() }
+                Task {
+                    await liquidation.autoCalculateFromLatestScreenshot()
+                    if liquidation.mode == .jpy { await liquidation.refreshUSDJPYRate() }
                 }
-            } else {
-                liquidation.stopContinuousRecognition()
             }
         }
         // 切到日元模式时补刷一次汇率（切模式重算最终价已带回汇率时则以那次为准，

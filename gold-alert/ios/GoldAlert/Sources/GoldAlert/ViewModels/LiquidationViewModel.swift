@@ -12,12 +12,7 @@ final class LiquidationViewModel: ObservableObject {
     private static let recognitionNoteKey = "lastRecognitionNote_v1"
     private static let lastSuccessAssetDateKey = "lastSuccessScreenshotDate_v1"
 
-    /// 持续识别循环（ren 2026-11-19 要求：识别成功后不要停，留在
-    /// app 里就继续认新截图，直到他划出去；划回来重新开始）。
-    private var recognitionLoop: Task<Void, Never>?
-    /// 本轮前台里已经尝试过的截图 id：同一张不反复 OCR（失败的也不
-    /// 重试），划出去再划进来时清空、重新尝试最新一张。
-    private var attemptedAssetIDs: Set<String> = []
+
 
     /// 最近一次截图识别的结果说明（成功写读到的笔数/均价/手数，失败写
     /// 失败在哪一步），持久化并显示在最终价明细页底部。识别失败历来是
@@ -144,26 +139,9 @@ final class LiquidationViewModel: ObservableObject {
         }
     }
 
-    /// 画面打开时自动调用：默认去截图相册找最后一张图片并计算最终价，不需点任何按钮。
-    /// 开始持续识别：立刻认一次最新截图，之后每 3 秒看一眼有没有
-    /// 新截图，有就认。ren 划出去（scenePhase 非 active）时由
-    /// MainView 调 stopContinuousRecognition 停下，划回来再 start。
-    func startContinuousRecognition() {
-        recognitionLoop?.cancel()
-        attemptedAssetIDs.removeAll()
-        recognitionLoop = Task {
-            while !Task.isCancelled {
-                await self.autoCalculateFromLatestScreenshot()
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-            }
-        }
-    }
-
-    func stopContinuousRecognition() {
-        recognitionLoop?.cancel()
-        recognitionLoop = nil
-    }
-
+    /// 只在打开 app、或从别处切换回 app 时调用一次：去截图相册取
+    /// 最新一张解析。其他时候不取不解析（ren 2026-11-19 改定：
+    /// 构建 52 的每 3 秒持续识别已取消）。
     /// 找不到图、图片不对、解析/计算失败都静默返回——不弹任何提示，并保留上次结果。
     /// 只有读到新图且计算成功才刷新结果（并持久化）；成功后沿用旧逻辑删掉已用截图。
     func autoCalculateFromLatestScreenshot() async {
@@ -177,29 +155,11 @@ final class LiquidationViewModel: ObservableObject {
             return
         }
 
-        // 记录里要标明读的是哪张图（ren 2026-11-19 要求）：截图的
-        // 创建时间 + 读到的开仓价清单，让他能对着相册核对读没读对图、
-        // 漏没漏笔。shotLabel/ocrText 提到 do 外，失败时也能写进记录。
-        var shotLabel = "未知"
-        var ocrText: String? = nil
         do {
             let asset = try PhotoLibraryService.fetchLatestScreenshotAsset()
-            if let created = asset.creationDate {
-                let df = DateFormatter()
-                df.dateFormat = "MM-dd HH:mm"
-                shotLabel = df.string(from: created)
-            }
-            // 本轮前台里已尝试过的图不再重复认（持续识别每 3 秒查
-            // 一次，靠这条避免对同一张图反复 OCR）；划出去再划进来
-            // 时集合清空、会重新尝试最新一张。
-            if attemptedAssetIDs.contains(asset.localIdentifier) {
-                return
-            }
-            attemptedAssetIDs.insert(asset.localIdentifier)
-
             // 比上次成功识别的图更旧的图不认：识别成功后会删掉用过的
-            // 截图，删完之后「最新」会变成更早的旧截图，持续识别若不
-            // 挡住，会一张张往回把旧图全认一遍、覆盖掉新结果。
+            // 截图，删完之后「最新」会变成更早的旧截图，若不挡住，
+            // 每次切回 app 都会把旧图认一遍、覆盖掉新结果。
             let lastSuccess = UserDefaults.standard.double(forKey: Self.lastSuccessAssetDateKey)
             if lastSuccess > 0, let created = asset.creationDate,
                created.timeIntervalSince1970 <= lastSuccess {
@@ -210,13 +170,12 @@ final class LiquidationViewModel: ObservableObject {
             // 但要在记录里留一句，免得 ren 以为 app 没读新图（记录不更新
             // 时看起来像识别没反应，2026-11-19 一整天反复因此误判）。
             if asset.localIdentifier == UserDefaults.standard.string(forKey: Self.processedAssetKey) {
-                setRecognitionNote("\(buildLabel) · 图 \(shotLabel) · 这张图已识别过，现在显示的就是它的结果")
+                setRecognitionNote("\(buildLabel) · 这张图已识别过，现在显示的就是它的结果")
                 return
             }
 
             let image = try await PhotoLibraryService.loadImage(from: asset)
             let text = try await PhotoLibraryService.recognizeText(in: image)
-            ocrText = text
             // 识别回到纯 OCR 规则解析（ren 2026-11-19 定，AI 全部删除、
             // 盈亏对比也已按他要求删除）：Vision OCR 出文本 →
             // MT5ScreenshotParser 双流提取，失败即不采用、不动已存数据。
@@ -226,19 +185,15 @@ final class LiquidationViewModel: ObservableObject {
             // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
             Self.saveTradeData(data)
             applyResult(calculated)
-            // 结果完整展示（ren 2026-11-19 要求）：每行取的左价连同
-            // 右价一起列出（右价只展示、不参与计算），再把平均价的
-            // 算式原样写出——取了哪个价、怎么算的，一眼可核。
-            let goldCount = text.uppercased().components(separatedBy: "GOLD").count - 1
+            // 解析结果展示（ren 2026-11-19 定）：识别成功+构建号一行，
+            // 换行后只显示平均价计算公式，就结束——不带图名、不带其他
+            // 计数。公式里相加的价就是每行取的左价（开仓价）。
             let stats = MT5ScreenshotParser.extractionStats(ocrText: text)
-            let pairsText = stats.pairs
-                .map { "\(String(format: "%.2f", $0.entry))→\(String(format: "%.2f", $0.current))" }
-                .joined(separator: "｜")
             let entryList = stats.pairs
                 .map { String(format: "%.2f", $0.entry) }
                 .joined(separator: "+")
             setRecognitionNote(
-                "识别成功 · \(buildLabel) · 图 \(shotLabel) · \(data.positions.count) 笔 · 取左价 \(pairsText) · 均价 (\(entryList))÷\(data.positions.count)=\(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots)) · GOLD×\(goldCount) · 方向×\(stats.sides) · 价位×\(stats.prices)"
+                "识别成功 · \(buildLabel)\n均价 (\(entryList))÷\(data.positions.count)=\(String(format: "%.2f", data.averageEntry))"
             )
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
             if let created = asset.creationDate {
@@ -250,16 +205,9 @@ final class LiquidationViewModel: ObservableObject {
             // 删除已用截图；失败也静默（结果已保存，下次打开靠 processedAssetKey 跳过）。
             try? await PhotoLibraryService.deleteAsset(asset)
         } catch {
-            // 静默：不提示、不清旧结果；但把失败原因记下来供明细页查看。
-            // 附上 OCR 文本里 GOLD 出现次数：图里有几笔、文本读到几处，
-            // 一眼能分清是读错图、OCR 漏行还是解析漏提。
-            var message = "识别失败 · \(buildLabel) · 图 \(shotLabel) · \(error.localizedDescription)"
-            if let text = ocrText {
-                let goldCount = text.uppercased().components(separatedBy: "GOLD").count - 1
-                let stats = MT5ScreenshotParser.extractionStats(ocrText: text)
-                message += " · 文本 GOLD×\(goldCount) · 方向×\(stats.sides) · 价位×\(stats.prices)"
-            }
-            setRecognitionNote(message)
+            // 静默：不提示、不清旧结果；记录只留构建号+失败原因
+            // （ren 2026-11-19 定：图名与各种计数都不要）。
+            setRecognitionNote("识别失败 · \(buildLabel)\n\(error.localizedDescription)")
         }
     }
 
