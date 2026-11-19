@@ -10,6 +10,14 @@ final class LiquidationViewModel: ObservableObject {
     private static let tradeDataKey = "lastScreenshotTradeData_v1"
     private static let usdJpyRateKey = "lastUSDJPYRate_v1"
     private static let recognitionNoteKey = "lastRecognitionNote_v1"
+    private static let lastSuccessAssetDateKey = "lastSuccessScreenshotDate_v1"
+
+    /// 持续识别循环（ren 2026-11-19 要求：识别成功后不要停，留在
+    /// app 里就继续认新截图，直到他划出去；划回来重新开始）。
+    private var recognitionLoop: Task<Void, Never>?
+    /// 本轮前台里已经尝试过的截图 id：同一张不反复 OCR（失败的也不
+    /// 重试），划出去再划进来时清空、重新尝试最新一张。
+    private var attemptedAssetIDs: Set<String> = []
 
     /// 最近一次截图识别的结果说明（成功写读到的笔数/均价/手数，失败写
     /// 失败在哪一步），持久化并显示在最终价明细页底部。识别失败历来是
@@ -137,6 +145,25 @@ final class LiquidationViewModel: ObservableObject {
     }
 
     /// 画面打开时自动调用：默认去截图相册找最后一张图片并计算最终价，不需点任何按钮。
+    /// 开始持续识别：立刻认一次最新截图，之后每 3 秒看一眼有没有
+    /// 新截图，有就认。ren 划出去（scenePhase 非 active）时由
+    /// MainView 调 stopContinuousRecognition 停下，划回来再 start。
+    func startContinuousRecognition() {
+        recognitionLoop?.cancel()
+        attemptedAssetIDs.removeAll()
+        recognitionLoop = Task {
+            while !Task.isCancelled {
+                await self.autoCalculateFromLatestScreenshot()
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
+    }
+
+    func stopContinuousRecognition() {
+        recognitionLoop?.cancel()
+        recognitionLoop = nil
+    }
+
     /// 找不到图、图片不对、解析/计算失败都静默返回——不弹任何提示，并保留上次结果。
     /// 只有读到新图且计算成功才刷新结果（并持久化）；成功后沿用旧逻辑删掉已用截图。
     func autoCalculateFromLatestScreenshot() async {
@@ -162,6 +189,23 @@ final class LiquidationViewModel: ObservableObject {
                 df.dateFormat = "MM-dd HH:mm"
                 shotLabel = df.string(from: created)
             }
+            // 本轮前台里已尝试过的图不再重复认（持续识别每 3 秒查
+            // 一次，靠这条避免对同一张图反复 OCR）；划出去再划进来
+            // 时集合清空、会重新尝试最新一张。
+            if attemptedAssetIDs.contains(asset.localIdentifier) {
+                return
+            }
+            attemptedAssetIDs.insert(asset.localIdentifier)
+
+            // 比上次成功识别的图更旧的图不认：识别成功后会删掉用过的
+            // 截图，删完之后「最新」会变成更早的旧截图，持续识别若不
+            // 挡住，会一张张往回把旧图全认一遍、覆盖掉新结果。
+            let lastSuccess = UserDefaults.standard.double(forKey: Self.lastSuccessAssetDateKey)
+            if lastSuccess > 0, let created = asset.creationDate,
+               created.timeIntervalSince1970 <= lastSuccess {
+                return
+            }
+
             // 同一张图已成功算过（删除失败时会残留）：不重复计算、也不重复弹删除确认。
             // 但要在记录里留一句，免得 ren 以为 app 没读新图（记录不更新
             // 时看起来像识别没反应，2026-11-19 一整天反复因此误判）。
@@ -197,6 +241,11 @@ final class LiquidationViewModel: ObservableObject {
                 "识别成功 · \(buildLabel) · 图 \(shotLabel) · \(data.positions.count) 笔 · 取左价 \(pairsText) · 均价 (\(entryList))÷\(data.positions.count)=\(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots)) · GOLD×\(goldCount) · 方向×\(stats.sides) · 价位×\(stats.prices)"
             )
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
+            if let created = asset.creationDate {
+                UserDefaults.standard.set(
+                    created.timeIntervalSince1970, forKey: Self.lastSuccessAssetDateKey
+                )
+            }
 
             // 删除已用截图；失败也静默（结果已保存，下次打开靠 processedAssetKey 跳过）。
             try? await PhotoLibraryService.deleteAsset(asset)

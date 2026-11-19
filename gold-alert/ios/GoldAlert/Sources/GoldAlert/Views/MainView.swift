@@ -26,18 +26,22 @@ struct MainView: View {
         .padding(.top, 8)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // 每次打开画面：自动找截图里最后一张图算最终价（找不到/图不对静默，不提示）。
+        // 打开画面即开始持续识别：立刻认最新截图，之后每 3 秒查有
+        // 没有新截图、有就认（ren 2026-11-19 要求：识别成功后不要
+        // 停，直到他划出去；划回来重新开始）。找不到/图不对静默。
         .task {
-            await liquidation.autoCalculateFromLatestScreenshot()
+            liquidation.startContinuousRecognition()
             // 日元模式下每行盈亏数字要用美日实时汇率，打开画面时先刷一次。
             if liquidation.mode == .jpy { await liquidation.refreshUSDJPYRate() }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
-                Task {
-                    await liquidation.autoCalculateFromLatestScreenshot()
-                    if liquidation.mode == .jpy { await liquidation.refreshUSDJPYRate() }
+                liquidation.startContinuousRecognition()
+                if liquidation.mode == .jpy {
+                    Task { await liquidation.refreshUSDJPYRate() }
                 }
+            } else {
+                liquidation.stopContinuousRecognition()
             }
         }
         // 切到日元模式时补刷一次汇率（切模式重算最终价已带回汇率时则以那次为准，
