@@ -74,6 +74,23 @@ struct CommandResponse: Decodable, Sendable {
     var ea_online: Bool?
 }
 
+/// POST /api/parse-screenshot 的回执：服务器用视觉 AI 读 MT5 截图后
+/// 返回的结构化数据（本地 OCR 解析失败时的兜底通道）。
+struct AIScreenshotPayload: Decodable, Sendable {
+    var balance: Double
+    var equity: Double?
+    var margin: Double
+    var positions: [AIScreenshotPosition]
+}
+
+struct AIScreenshotPosition: Decodable, Sendable {
+    var side: String
+    var lots: Double
+    var entry: Double
+    var current: Double
+    var profit: Double?
+}
+
 struct AlertsPayload: Decodable, Sendable {
     var alerts: [AlertDTO]
     var max: Int?

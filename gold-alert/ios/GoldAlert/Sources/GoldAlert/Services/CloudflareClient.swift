@@ -70,6 +70,16 @@ actor CloudflareClient {
         try await post("/api/command", baseURL: baseURL, token: token, json: ["type": "close_all"])
     }
 
+    /// AI 兜底读图：把 MT5 截图（JPEG）发给服务器，服务器用视觉 AI
+    /// 读出结构化数据返回。AI 推理慢，单独放宽超时到 60 秒。
+    func parseScreenshotViaAI(baseURL: String, token: String, imageData: Data) async throws -> AIScreenshotPayload {
+        let body: [String: Any] = ["image": imageData.base64EncodedString()]
+        let data = try JSONSerialization.data(withJSONObject: body, options: [])
+        var request = try makeRequest(path: "/api/parse-screenshot", baseURL: baseURL, token: token, method: "POST", body: data)
+        request.timeoutInterval = 60
+        return try await send(request)
+    }
+
     // MARK: - HTTP
 
     private func get<T: Decodable>(_ path: String, baseURL: String, token: String) async throws -> T {

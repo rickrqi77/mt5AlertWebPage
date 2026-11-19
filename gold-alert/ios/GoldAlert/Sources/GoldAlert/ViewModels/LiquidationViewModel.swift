@@ -158,8 +158,22 @@ final class LiquidationViewModel: ObservableObject {
             }
 
             let image = try await PhotoLibraryService.loadImage(from: asset)
-            let ocr = try await PhotoLibraryService.recognizeText(in: image)
-            let data = try MT5ScreenshotParser.parse(ocrText: ocr)
+            let data: ScreenshotTradeData
+            var viaAI = false
+            do {
+                let ocr = try await PhotoLibraryService.recognizeText(in: image)
+                data = try MT5ScreenshotParser.parse(ocrText: ocr)
+            } catch {
+                // 本地 OCR 解析失败（版式/千分位等顽固误读）→ AI 兜底读图；
+                // AI 也失败时把本地的失败原因报出来（更接近真实卡点）。
+                let localError = error
+                do {
+                    data = try await Self.parseViaAI(image: image)
+                    viaAI = true
+                } catch {
+                    throw localError
+                }
+            }
             // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
             Self.saveTradeData(data)
             totalLots = data.totalLots
@@ -169,7 +183,7 @@ final class LiquidationViewModel: ObservableObject {
             let calculated = try await Self.calculate(mode: mode, data: data)
             applyResult(calculated)
             setRecognitionNote(
-                "识别成功 · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots))"
+                "识别成功\(viaAI ? "（AI）" : "") · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots))"
             )
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
 
@@ -179,6 +193,70 @@ final class LiquidationViewModel: ObservableObject {
             // 静默：不提示、不清旧结果；但把失败原因记下来供明细页查看。
             setRecognitionNote("识别失败 · \(error.localizedDescription)")
         }
+    }
+
+    /// AI 兜底读图：本地 OCR 解析失败时，把截图发到自己的服务器，
+    /// 服务器用视觉 AI 读出结构化数据。AI 的结果同样要过交叉校验
+    /// （逐笔盈亏、盈亏合计对净值−结余）才采用——AI 读错时宁可不用，
+    /// 与本地解析同一标准。
+    private static func parseViaAI(image: UIImage) async throws -> ScreenshotTradeData {
+        let token = KeychainStore.readToken()
+        let baseURL = KeychainStore.readBaseURL()
+        guard !token.isEmpty else {
+            throw AppError.message("未登录，AI 兜底不可用")
+        }
+        guard let jpeg = jpegForAI(image) else {
+            throw AppError.message("截图压缩失败")
+        }
+        let payload = try await CloudflareClient.shared.parseScreenshotViaAI(
+            baseURL: baseURL, token: token, imageData: jpeg
+        )
+        var positions: [GoldPosition] = []
+        var computedTotal = 0.0
+        for item in payload.positions {
+            guard let side = PositionSide(rawValue: item.side.lowercased()) else { continue }
+            let position = GoldPosition(
+                symbol: "GOLD", side: side, lots: item.lots, entryPrice: item.entry
+            )
+            positions.append(position)
+            let diff = side == .buy
+                ? item.current - item.entry
+                : item.entry - item.current
+            let computed = diff * item.lots * 100
+            computedTotal += computed
+            if let shown = item.profit,
+               abs(computed - shown) > max(3.0, abs(shown) * 0.15) {
+                throw AppError.message("AI 结果自相矛盾（单笔盈亏对不上）")
+            }
+        }
+        guard !positions.isEmpty else {
+            throw AppError.message("AI 没读到持仓")
+        }
+        if let equity = payload.equity {
+            let expected = equity - payload.balance
+            guard abs(computedTotal - expected) <= max(20.0, abs(expected) * 0.20) else {
+                throw AppError.message("AI 结果自相矛盾（盈亏合计对不上）")
+            }
+        }
+        return ScreenshotTradeData(
+            balance: payload.balance, margin: payload.margin, positions: positions
+        )
+    }
+
+    /// 发给 AI 的图：宽压到 1100 以内、JPEG 0.7——数字足够清楚，
+    /// 上传与推理都快不少。
+    private static func jpegForAI(_ image: UIImage) -> Data? {
+        var target = image
+        let maxWidth: CGFloat = 1100
+        if image.size.width > maxWidth {
+            let scale = maxWidth / image.size.width
+            let newSize = CGSize(width: maxWidth, height: image.size.height * scale)
+            let renderer = UIGraphicsImageRenderer(size: newSize)
+            target = renderer.image { _ in
+                image.draw(in: CGRect(origin: .zero, size: newSize))
+            }
+        }
+        return target.jpegData(compressionQuality: 0.7)
     }
 
     private func setRecognitionNote(_ text: String) {
