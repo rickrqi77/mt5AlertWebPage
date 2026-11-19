@@ -187,14 +187,31 @@ final class LiquidationViewModel: ObservableObject {
             applyResult(calculated)
             // 解析结果展示（ren 2026-11-19 定）：识别成功+构建号一行，
             // 换行后只显示平均价计算公式，就结束——不带图名、不带其他
-            // 计数。公式里相加的价就是每行取的左价（开仓价）。
-            let stats = MT5ScreenshotParser.extractionStats(ocrText: text)
-            let entryList = stats.pairs
-                .map { String(format: "%.2f", $0.entry) }
-                .joined(separator: "+")
-            setRecognitionNote(
-                "识别成功 · \(buildLabel)\n均价 (\(entryList))÷\(data.positions.count)=\(String(format: "%.2f", data.averageEntry))"
-            )
+            // 计数。均价是手数加权平均：各笔手数相同时公式就是左价
+            // 相加÷笔数；手数不同（如混了 0.2 手）必须把权重写进
+            // 公式，否则算式对不上结果、看着像算错（2026-11-20 ren
+            // 实报「有 0.2 时均价不对」一半是显示问题）。公式取
+            // data.positions（实际落存的那批），不再另走提取统计。
+            let lotsList = data.positions.map(\.lots)
+            let uniformLots = lotsList.allSatisfy {
+                abs($0 - (lotsList.first ?? 0)) < 0.0001
+            }
+            let avgText = String(format: "%.2f", data.averageEntry)
+            let formula: String
+            if uniformLots {
+                let entryList = data.positions
+                    .map { String(format: "%.2f", $0.entryPrice) }
+                    .joined(separator: "+")
+                formula = "均价 (\(entryList))÷\(data.positions.count)=\(avgText)"
+            } else {
+                let terms = data.positions
+                    .map {
+                        "\(String(format: "%.2f", $0.entryPrice))×\(Self.trimNumber($0.lots))"
+                    }
+                    .joined(separator: "+")
+                formula = "均价 (\(terms))÷\(Self.trimNumber(data.totalLots))=\(avgText)"
+            }
+            setRecognitionNote("识别成功 · \(buildLabel)\n\(formula)")
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
             if let created = asset.creationDate {
                 UserDefaults.standard.set(
@@ -217,6 +234,14 @@ final class LiquidationViewModel: ObservableObject {
     private var buildLabel: String {
         let version = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         return "构建 \(version)"
+    }
+
+    /// 公式里手数的写法：0.10→「0.1」、0.50→「0.5」、0.25 保持。
+    private static func trimNumber(_ value: Double) -> String {
+        var s = String(format: "%.2f", value)
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+        return s
     }
 
     private func setRecognitionNote(_ text: String) {

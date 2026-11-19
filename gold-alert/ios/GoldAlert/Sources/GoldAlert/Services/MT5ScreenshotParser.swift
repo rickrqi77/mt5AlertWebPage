@@ -94,7 +94,11 @@ enum MT5ScreenshotParser {
         let accountLines = lines.prefix(while: {
             goldSymbol(in: $0) == nil && !$0.contains("持仓")
         })
-        let text = accountLines.joined(separator: " ")
+        // 拼成一段后再压一次千分位空格：结余过千后带空格分隔
+        // （如「1 290.03」），OCR 若把「1」和「290.03」拆成两行，
+        // 逐行压缩压不到、firstNumber 会先抓到「1」把结余读成 1
+        // （2026-11-20 ren 的 1 290.03 截图实证风险点）。
+        let text = collapseThousands(accountLines.joined(separator: " "))
         guard let labelRange = text.range(of: label) else { return nil }
         let tail = text[labelRange.upperBound...]
         var end = tail.endIndex
@@ -253,7 +257,12 @@ enum MT5ScreenshotParser {
     /// 0.01 步进（小数至多两位），OCR 把手数与后面数字读串时出现的
     /// 四位小数不采信、跳过该候选继续找。
     private static func collectSides(in text: String) -> [(side: PositionSide, lots: Double)] {
-        let pattern = #"(?i)\b(buy|sell)\b\s*([0-9OIl]+(?:\.[0-9OIl]+)?)"#
+        // 方向词后面不加 \b：OCR 偶尔把「sell 0.2」粘成「sell0.2」，
+        // sell 与数字之间没有词边界、带 \b 就整笔漏掉，再被多数派
+        // 补成 0.1——手数合计与加权均价一起错（2026-11-20 ren 实报
+        // 0.2 手没识别出来）。小数点也允许读成逗号（0,2），token
+        // 修复时一并换回。
+        let pattern = #"(?i)\b(buy|sell)\s*([0-9OIl]+(?:[.,][0-9OIl]+)?)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let ns = text as NSString
         let full = NSRange(location: 0, length: ns.length)
@@ -264,6 +273,7 @@ enum MT5ScreenshotParser {
                 .replacingOccurrences(of: "O", with: "0")
                 .replacingOccurrences(of: "I", with: "1")
                 .replacingOccurrences(of: "l", with: "1")
+                .replacingOccurrences(of: ",", with: ".")
             guard isValidLotsToken(token),
                   let lots = Double(token), lots > 0, lots < 100 else { continue }
             let sideRaw = ns.substring(with: match.range(at: 1)).lowercased()
@@ -352,13 +362,21 @@ enum MT5ScreenshotParser {
             // 成一个数——「sell 0.05 6 781」→「sell 0.056781」，手数变成六位小数
             // 被判无效、整笔持仓被跳过（2026-10-30 实测：两笔 sell 0.05 只读到
             // 第一笔，日元账户盈亏带千分位空格、同行排版时踩中）。
-            while let range = l.range(of: #"(?<![0-9.])(\d+) (\d{3}(?:\D|$))"#, options: .regularExpression) {
-                let compact = l[range].replacingOccurrences(of: " ", with: "")
-                l.replaceSubrange(range, with: compact)
-            }
-            return l
+            return collapseThousands(l)
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// 压掉千分位空格（「1 290.03」→「1290.03」）。逐行压是
+    /// normalize 的老规矩；accountValue 把多行拼成一段后也要再压
+    /// 一次，防 OCR 把千位数字拆到两行时漏压。
+    private static func collapseThousands(_ s: String) -> String {
+        var l = s
+        while let range = l.range(of: #"(?<![0-9.])(\d+) (\d{3}(?:\D|$))"#, options: .regularExpression) {
+            let compact = l[range].replacingOccurrences(of: " ", with: "")
+            l.replaceSubrange(range, with: compact)
+        }
+        return l
     }
 
     private static func firstNumber(in text: String) -> Double? {
