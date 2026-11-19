@@ -164,14 +164,17 @@ final class LiquidationViewModel: ObservableObject {
                 let ocr = try await PhotoLibraryService.recognizeText(in: image)
                 data = try MT5ScreenshotParser.parse(ocrText: ocr)
             } catch {
-                // 本地 OCR 解析失败（版式/千分位等顽固误读）→ AI 兜底读图；
-                // AI 也失败时把本地的失败原因报出来（更接近真实卡点）。
+                // 本地 OCR 解析失败（版式/千分位等顽固误读）→ AI 兜底读图。
+                // 两边都失败时把两边的原因都记进识别记录：只报一边会
+                // 把 AI 那侧的卡点（接口/模型/它自己的校验）藏起来。
                 let localError = error
                 do {
                     data = try await Self.parseViaAI(image: image)
                     viaAI = true
                 } catch {
-                    throw localError
+                    let local = String(localError.localizedDescription.prefix(46))
+                    let ai = String(error.localizedDescription.prefix(46))
+                    throw AppError.message("本地：\(local)；AI：\(ai)")
                 }
             }
             // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
@@ -226,7 +229,9 @@ final class LiquidationViewModel: ObservableObject {
             computedTotal += computed
             if let shown = item.profit,
                abs(computed - shown) > max(3.0, abs(shown) * 0.15) {
-                throw AppError.message("AI 结果自相矛盾（单笔盈亏对不上）")
+                throw AppError.message(
+                    "AI 结果自相矛盾（单笔盈亏：重算 \(String(format: "%.2f", computed))、显示 \(String(format: "%.2f", shown))）"
+                )
             }
         }
         guard !positions.isEmpty else {
@@ -235,7 +240,9 @@ final class LiquidationViewModel: ObservableObject {
         if let equity = payload.equity {
             let expected = equity - payload.balance
             guard abs(computedTotal - expected) <= max(20.0, abs(expected) * 0.20) else {
-                throw AppError.message("AI 结果自相矛盾（盈亏合计对不上）")
+                throw AppError.message(
+                    "AI 结果自相矛盾（盈亏合计：重算 \(String(format: "%.2f", computedTotal))、参照 \(String(format: "%.2f", expected))）"
+                )
             }
         }
         return ScreenshotTradeData(

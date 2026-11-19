@@ -48,10 +48,16 @@ enum MT5ScreenshotParser {
             if let shown = displayedProfits[index] {
                 let tolerance = max(3.0, abs(shown) * 0.15)
                 guard abs(computed - shown) <= tolerance else {
-                    throw AppError.message("截图持仓对不上（单笔盈亏对不上），这次没采用")
+                    throw AppError.message(
+                        "截图持仓对不上（单笔盈亏：重算 \(fmt2(computed))、显示 \(fmt2(shown))），这次没采用"
+                    )
                 }
             }
         }
+        // 合计参照尽量多备几个独立来源，任一对上即放行：净值−结余、
+        // 各笔显示盈亏之和、顶部蓝色总盈亏（「53.10 USD」）。单个数字
+        // 被 OCR 读偏时不再一票否决；真读错时三个参照会一致地对不上，
+        // 报错里带上重算值与参照值，一眼能看出哪边错、错多少。
         var totalChecks: [Double] = []
         if let equity = findLabeledNumber(
             in: lines,
@@ -63,12 +69,18 @@ enum MT5ScreenshotParser {
         if displayedProfits.allSatisfy({ $0 != nil }) {
             totalChecks.append(displayedProfits.compactMap { $0 }.reduce(0, +))
         }
+        if let headerTotal = findHeaderTotal(in: lines) {
+            totalChecks.append(headerTotal)
+        }
         if !totalChecks.isEmpty {
             let anyMatch = totalChecks.contains {
                 abs(computedTotal - $0) <= max(20.0, abs($0) * 0.20)
             }
             guard anyMatch else {
-                throw AppError.message("截图持仓对不上（盈亏合计对不上），这次没采用")
+                let refs = totalChecks.map { fmt2($0) }.joined(separator: "/")
+                throw AppError.message(
+                    "截图持仓对不上（盈亏合计：重算 \(fmt2(computedTotal))、参照 \(refs)），这次没采用"
+                )
             }
         }
 
@@ -202,27 +214,56 @@ enum MT5ScreenshotParser {
                 )
             )
             currents.append(prices[1])
-            displayedProfits.append(displayedProfit(in: lines[start.index], lots: start.lots))
+            displayedProfits.append(
+                displayedProfit(inBlock: lines[start.index..<blockEnd], lots: start.lots)
+            )
         }
         return (positions, currents, displayedProfits)
     }
 
-    /// 品种行行尾 MT5 显示的该笔盈亏（如「GOLD# sell 0.1 123.90」的
-    /// 123.90、「-25.20」的负数）。取法：行内带小数点的数字里，排除
-    /// 手数本身与黄金价位，最后一个即盈亏；没有则 nil。要求带小数
-    /// 点，是为了不把品种名里的整数（如 GOLD24-7）误当盈亏。
-    private static func displayedProfit(in line: String, lots: Double) -> Double? {
+    /// 该笔 MT5 显示的盈亏（如 123.90、-25.20）。在整个持仓区块里找：
+    /// 带小数点的数字里排除手数本身与黄金价位（开仓/现价），最后一个
+    /// 即盈亏；没有则 nil。只查品种行时，若 OCR 把盈亏拼到了价格行上
+    /// 就读不到（2026-11-19 构建 34 实证：逐笔校验被整段跳过、只剩
+    /// 净值一条参照又被读偏，正常截图被误杀）。要求带小数点，是为了
+    /// 不把品种名里的整数（如 GOLD24-7）误当盈亏。
+    private static func displayedProfit(inBlock block: ArraySlice<String>, lots: Double) -> Double? {
         let pattern = try! NSRegularExpression(pattern: #"-?[0-9]+\.[0-9]+"#)
-        let ns = line as NSString
-        let full = NSRange(location: 0, length: ns.length)
         var profit: Double? = nil
-        for match in pattern.matches(in: line, options: [], range: full) {
-            guard let value = Double(ns.substring(with: match.range)) else { continue }
-            if abs(abs(value) - lots) < 0.0001 { continue }
-            if isGoldPrice(abs(value)) { continue }
-            profit = value
+        for line in block {
+            let ns = line as NSString
+            let full = NSRange(location: 0, length: ns.length)
+            for match in pattern.matches(in: line, options: [], range: full) {
+                guard let value = Double(ns.substring(with: match.range)) else { continue }
+                if abs(abs(value) - lots) < 0.0001 { continue }
+                if isGoldPrice(abs(value)) { continue }
+                profit = value
+            }
         }
         return profit
+    }
+
+    /// 截图顶部蓝色大字是全部持仓的浮盈合计（如「53.10 USD」），
+    /// 字大、位置固定，OCR 最不容易读错——作盈亏合计的独立参照。
+    private static func findHeaderTotal(in lines: [String]) -> Double? {
+        let pattern = try! NSRegularExpression(
+            pattern: #"(-?[0-9][0-9 ]*(?:\.[0-9]+)?)\s*USD"#
+        )
+        for line in lines.prefix(6) {
+            let ns = line as NSString
+            let full = NSRange(location: 0, length: ns.length)
+            if let match = pattern.firstMatch(in: line, options: [], range: full),
+               match.numberOfRanges >= 2 {
+                let raw = ns.substring(with: match.range(at: 1))
+                    .replacingOccurrences(of: " ", with: "")
+                if let value = Double(raw) { return value }
+            }
+        }
+        return nil
+    }
+
+    private static func fmt2(_ value: Double) -> String {
+        String(format: "%.2f", value)
     }
 
     private static func goldSymbol(in line: String) -> String? {
