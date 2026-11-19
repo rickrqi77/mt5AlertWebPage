@@ -39,12 +39,14 @@ enum MT5ScreenshotParser {
         // 只靠净值一条路时正常截图被误杀（2026-11-19 构建 30–33 连坏
         // 三轮的实因）；显示盈亏是小数字、无千分位，不吃这个亏。
         var computedTotal = 0.0
+        var computedList: [Double] = []
         for (index, position) in positions.enumerated() {
             let diff = position.side == .buy
                 ? currents[index] - position.entryPrice
                 : position.entryPrice - currents[index]
             let computed = diff * position.lots * 100
             computedTotal += computed
+            computedList.append(computed)
             if let shown = displayedProfits[index] {
                 let tolerance = max(3.0, abs(shown) * 0.15)
                 // 负号最容易被 OCR 丢（红色负数）：量级对得上、只差
@@ -82,8 +84,9 @@ enum MT5ScreenshotParser {
             }
             guard anyMatch else {
                 let refs = totalChecks.map { fmt2($0) }.joined(separator: "/")
+                let parts = computedList.map { fmt2($0) }.joined(separator: "/")
                 throw AppError.message(
-                    "截图持仓对不上（盈亏合计：重算 \(fmt2(computedTotal))、参照 \(refs)），这次没采用"
+                    "截图持仓对不上（盈亏合计：重算 \(fmt2(computedTotal))（\(parts)）、参照 \(refs)），这次没采用"
                 )
             }
         }
