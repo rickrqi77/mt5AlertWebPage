@@ -26,17 +26,18 @@ enum MT5ScreenshotParser {
         }
 
         // Only real OCR lines — do not append the joined blob (that duplicated positions).
-        let (positions, currents) = extractGoldPositions(from: lines)
+        let (positions, currents) = try extractGoldPositions(from: lines)
         guard !positions.isEmpty else {
             throw AppError.message("截图里没有 GOLD 持仓")
         }
 
-        // 盈亏交叉校验（2026-11-19 ren 实报：三笔 sell 0.1 只读出两笔，均价与
-        // 手数全错但没报错）：OCR 漏掉/串行一笔时，顺序配对会静默错位。
-        // 截图自带真值——净值−结余就是全部持仓的浮盈合计；按解析出的持仓
-        // （开仓价、现价、手数、方向）重算的浮盈与它对不上（容差取
-        // max(5 美元, 5%)，吸收隔夜利息与 OCR 小数误差）就整次作废，
-        // 调用方会保留上次的好数据。净值没读到时跳过校验，不误杀。
+        // 盈亏交叉校验（第二道防线）：截图自带真值——净值−结余就是全部
+        // 持仓的浮盈合计；按解析出的持仓重算的浮盈与它差太多就整次作废。
+        // 容差必须放宽到 max(20 美元, 20%)：重算不含隔夜利息、截图可能
+        // 没截全持仓列表，第一版用 max(5, 5%) 时正常截图被频繁误杀、
+        // 自动识别看起来像坏了（2026-11-19 ren 实报）。这道校验只负责
+        // 拦「整笔持仓级别」的大错；精确拦截漏读靠 extractGoldPositions
+        // 里的笔数对齐检查。净值没读到时跳过校验。
         if let equity = findLabeledNumber(
             in: lines,
             labels: ["净值"],
@@ -50,7 +51,7 @@ enum MT5ScreenshotParser {
                     : position.entryPrice - current
                 computed += diff * position.lots * 100
             }
-            let tolerance = max(5.0, abs(expected) * 0.05)
+            let tolerance = max(20.0, abs(expected) * 0.20)
             guard abs(computed - expected) <= tolerance else {
                 throw AppError.message("截图持仓对不上，这次没采用")
             }
@@ -136,7 +137,7 @@ enum MT5ScreenshotParser {
     /// 不进 GoldPosition 模型）。
     private static func extractGoldPositions(
         from lines: [String]
-    ) -> (positions: [GoldPosition], currents: [Double]) {
+    ) throws -> (positions: [GoldPosition], currents: [Double]) {
         // 第一步：收集全部持仓起点（含 GOLD/XAU 品种的行）。方向+手数就在该行
         // 上（MT5 排版如「GOLD# sell 0.05」），或紧随的一两行内；查找止于下一个
         // 品种行，避免把下一笔的方向手数串过来。
@@ -161,6 +162,14 @@ enum MT5ScreenshotParser {
             for pair in entryPricePairs(inLine: line) {
                 priceEntries.append((index: index, entry: pair.entry, current: pair.current))
             }
+        }
+
+        // 笔数对齐检查（第一道防线，2026-11-19）：识别到的持仓行数与价格行数
+        // 必须相等。OCR 漏掉一行价格时顺序配对会整体顺移、最后一笔被挤掉
+        // （三笔 sell 0.1 只读出两笔、均价手数全错的实报即此），宁可整次
+        // 作废保留旧数据，也不能让错位的数据静默写进去。
+        guard starts.count == priceEntries.count else {
+            throw AppError.message("截图持仓对不上，这次没采用")
         }
 
         // 第三步：按顺序一一配对——第 k 笔持仓取它品种行之后（含本行）、还没被
