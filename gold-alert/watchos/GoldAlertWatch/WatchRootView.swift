@@ -134,33 +134,36 @@ struct WatchRootView: View {
 
     // MARK: - 第二页：间隔设定页
 
-    /// 设定页布局（ren 2026-11-20 改版）：连接圆点在左上角、内容
-    /// 整体上移；「间隔」标题靠左；间隔区与刷新间隔区之间一条
-    /// 分割线；刷新间隔两排六档（0.5/1/2、3/5/10）。按钮高度
-    /// 初版 38/34 太高、整页溢出把顶部标题和底部都挤出屏外
-    /// （ren 装机构图实报），改 30/28 并收紧间距，整页留出余量。
+    /// 设定页布局（ren 2026-11-20 改版）：连接圆点在左上角；
+    /// 「间隔」标题靠左；间隔区与刷新间隔区之间一条分割线；
+    /// 刷新间隔两排六档（0.5/1/2、3/5/10）。整页改为可上下
+    /// 滚动（ren 2026-11-20 再改定：固定一屏时顶部绿点与底部
+    /// 设定结果总是被挤出屏外）——只有这一页滚动，时钟页与
+    /// 平仓页不动；转表冠或滑动都能滚，内容从顶部排起。
     private var settingsPage: some View {
-        VStack(spacing: 4) {
-            header
-            stepPicker
-            Divider()
-            refreshPicker
-            if !model.hasServerCredentials {
-                Text("未同步直发凭据，暂经手机发送")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
+        ScrollView {
+            VStack(spacing: 4) {
+                header
+                stepPicker
+                Divider()
+                refreshPicker
+                if !model.hasServerCredentials {
+                    Text("未同步直发凭据，暂经手机发送")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+                if let notice = model.notice {
+                    Text(notice)
+                        .font(.caption2)
+                        .foregroundStyle(model.noticeIsError ? .red : .green)
+                        .multilineTextAlignment(.center)
+                }
             }
-            if let notice = model.notice {
-                Text(notice)
-                    .font(.caption2)
-                    .foregroundStyle(model.noticeIsError ? .red : .green)
-                    .multilineTextAlignment(.center)
-            }
+            .padding(.horizontal, 4)
+            .padding(.top, 2)
+            .padding(.bottom, 6)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.horizontal, 4)
-        .padding(.top, 2)
     }
 
     /// 连接状态点（绿=手机可达、灰=不可达）固定在屏幕左上角；
