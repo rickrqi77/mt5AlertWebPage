@@ -159,18 +159,11 @@ final class LiquidationViewModel: ObservableObject {
 
             let image = try await PhotoLibraryService.loadImage(from: asset)
             let ocrText = try await PhotoLibraryService.recognizeText(in: image)
-            // 识别只走 iPhone 本机 AI 一条路（ren 2026-11-19 定，不要
-            // 其他的）：OCR 出文本 → 本机大模型结构化提取 → 交叉校验。
-            // 规则解析与云端视觉 AI 都已撤除。
-            let data: ScreenshotTradeData
-            if #available(iOS 26.0, *), OnDeviceScreenshotAI.isAvailable {
-                data = try await Self.parseViaOnDeviceAI(ocrText: ocrText)
-            } else {
-                throw AppError.message("本机 AI 不可用（需 iOS 26 且 Apple Intelligence 就绪）")
-            }
-            // 先算成功才存：计算中途失败（如数据不合公式）绝不能把
-            // 上次的好数据覆盖掉（2026-11-19 实证：AI 编造数据先落存、
-            // 计算才报错，结余被冲成 0）。
+            // 识别回到纯 OCR 规则解析（ren 2026-11-19 定，AI 全部删除）：
+            // Vision OCR 出文本 → MT5ScreenshotParser 按区块提取并交叉
+            // 校验，失败即不采用、不动已存数据。
+            let data = try MT5ScreenshotParser.parse(ocrText: ocrText)
+            // 先算成功才存：计算中途失败绝不能覆盖上次的好数据。
             let calculated = try await Self.calculate(mode: mode, data: data)
             // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
             Self.saveTradeData(data)
@@ -186,122 +179,6 @@ final class LiquidationViewModel: ObservableObject {
             // 静默：不提示、不清旧结果；但把失败原因记下来供明细页查看。
             setRecognitionNote("识别失败 · \(error.localizedDescription)")
         }
-    }
-
-    /// 本机 AI 提取结果的整形+校验：把原始数字组成持仓，过逐笔盈亏
-    /// 与盈亏合计（对净值−结余）交叉校验才采用——读错宁可不用。
-    private struct RawPosition {
-        let side: PositionSide
-        let lots: Double
-        let entry: Double
-        let current: Double
-        let profit: Double?
-    }
-
-    private static func buildValidated(
-        balance: Double,
-        margin: Double,
-        equity: Double?,
-        raw: [RawPosition],
-        source: String
-    ) throws -> ScreenshotTradeData {
-        guard !raw.isEmpty else {
-            throw AppError.message("\(source) 没读到持仓")
-        }
-        // 基本合理性闸门：本机 AI 偶尔会编造整套数字（2026-11-19 实证
-        // 它把指令示例里的数字当成数据交回来），编造值过不了这几关；
-        // 真数据必然结余为正、方向统一、开仓价在金价区间内。
-        guard balance > 0, margin >= 0 else {
-            throw AppError.message("\(source) 结果不合理（结余/预付款异常）")
-        }
-        if let equity, equity <= 0 {
-            throw AppError.message("\(source) 结果不合理（净值异常）")
-        }
-        guard raw.allSatisfy({ $0.side == raw[0].side }) else {
-            throw AppError.message("\(source) 结果方向不统一（buy/sell 混杂）")
-        }
-        guard raw.allSatisfy({
-            $0.entry >= 500 && $0.entry <= 20000 && $0.lots > 0 && $0.lots < 100
-        }) else {
-            throw AppError.message("\(source) 结果不合理（开仓价/手数异常）")
-        }
-        var positions: [GoldPosition] = []
-        var computedList: [Double] = []
-        // 与显示盈亏只差一个符号的笔先记下、不当场判死：可能是 AI 把
-        // 方向标反，也可能是它把某笔盈亏的正负号读反（2026-11-19
-        // 实证：3750.10 那笔实际 +113.40 蓝字盈利，AI 报成 -113.40，
-        // 重算反而是对的）。两种猜测由合计（净值−结余）仲裁。
-        var flipCandidates: [Int] = []
-        for (index, item) in raw.enumerated() {
-            let diff = item.side == .buy
-                ? item.current - item.entry
-                : item.entry - item.current
-            let computed = diff * item.lots * 100
-            computedList.append(computed)
-            positions.append(
-                GoldPosition(symbol: "GOLD", side: item.side, lots: item.lots, entryPrice: item.entry)
-            )
-            if let shown = item.profit {
-                let tolerance = max(3.0, abs(shown) * 0.15)
-                if abs(computed - shown) > tolerance {
-                    if abs(computed + shown) <= tolerance {
-                        flipCandidates.append(index)
-                    } else {
-                        throw AppError.message(
-                            "\(source) 结果自相矛盾（单笔盈亏：重算 \(String(format: "%.2f", computed))、显示 \(String(format: "%.2f", shown))）"
-                        )
-                    }
-                }
-            }
-        }
-        var computedTotal = computedList.reduce(0, +)
-        if let equity {
-            let expected = equity - balance
-            let totalTolerance = max(20.0, abs(expected) * 0.20)
-            if abs(computedTotal - expected) > totalTolerance, !flipCandidates.isEmpty {
-                // 原样对不上合计 → 试把存疑几笔的方向翻过来再对：
-                // 翻后对上，说明 AI 标反的是方向，采用翻向版本。
-                var flippedTotal = computedTotal
-                for index in flipCandidates {
-                    flippedTotal -= 2 * computedList[index]
-                }
-                if abs(flippedTotal - expected) <= totalTolerance {
-                    for index in flipCandidates {
-                        let old = positions[index]
-                        positions[index] = GoldPosition(
-                            symbol: old.symbol,
-                            side: old.side == .buy ? .sell : .buy,
-                            lots: old.lots,
-                            entryPrice: old.entryPrice
-                        )
-                    }
-                    computedTotal = flippedTotal
-                }
-            }
-            guard abs(computedTotal - expected) <= totalTolerance else {
-                throw AppError.message(
-                    "\(source) 结果自相矛盾（盈亏合计：重算 \(String(format: "%.2f", computedTotal))、参照 \(String(format: "%.2f", expected))）"
-                )
-            }
-        }
-        return ScreenshotTradeData(balance: balance, margin: margin, positions: positions)
-    }
-
-    /// 唯一的识别路径：iPhone 本机 AI 整理 OCR 文本（离线、免费）。
-    @available(iOS 26.0, *)
-    private static func parseViaOnDeviceAI(ocrText: String) async throws -> ScreenshotTradeData {
-        let extracted = try await OnDeviceScreenshotAI.extract(from: ocrText)
-        let raw: [RawPosition] = extracted.positions.compactMap { item in
-            guard let side = PositionSide(rawValue: item.side.lowercased()) else { return nil }
-            return RawPosition(
-                side: side, lots: item.lots, entry: item.entry,
-                current: item.current, profit: item.profit
-            )
-        }
-        return try buildValidated(
-            balance: extracted.balance, margin: extracted.margin,
-            equity: extracted.equity, raw: raw, source: "本机AI"
-        )
     }
 
     private func setRecognitionNote(_ text: String) {
