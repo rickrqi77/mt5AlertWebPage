@@ -11,7 +11,10 @@
       "database_name": "gold-alert-db",
       "database_id": "9da0baf0-88bb-4771-8be6-c01532699203"
     }
-  ]
+  ],
+  "ai": {
+    "binding": "AI"
+  }
   // Static web UI is on Cloudflare Pages (alertdata.pages.dev).
   // /api is proxied by functions/api/[[path]].js → this Worker.
   // Deploy API: npm run deploy
