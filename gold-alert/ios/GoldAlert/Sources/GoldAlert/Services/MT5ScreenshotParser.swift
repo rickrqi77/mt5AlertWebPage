@@ -26,78 +26,11 @@ enum MT5ScreenshotParser {
         }
 
         // Only real OCR lines — do not append the joined blob (that duplicated positions).
-        let (positions, currents, displayedProfits) = try extractGoldPositions(from: lines)
+        // 盈亏对比校验已按 ren 2026-11-19 的决定整体删除：解析只负责
+        // 把数字提全、提对，不再做任何盈亏重算比对。
+        let positions = extractGoldPositions(from: lines)
         guard !positions.isEmpty else {
             throw AppError.message("截图里没有 GOLD 持仓")
-        }
-
-        // 盈亏交叉校验（第二道防线）：主校验是逐笔比对——每笔持仓行尾
-        // MT5 自己显示的盈亏，与按解析出的开仓/现价/手数重算的盈亏，
-        // 差超过 max(3 美元, 15%) 即整次作废。合计校验作兜底：重算合计
-        // 与「净值−结余」、或与「各笔显示盈亏之和」任一对得上即放行——
-        // 净值带千分位空格（1 225.93），OCR 分行时开头的「1」容易丢，
-        // 只靠净值一条路时正常截图被误杀（2026-11-19 构建 30–33 连坏
-        // 三轮的实因）；显示盈亏是小数字、无千分位，不吃这个亏。
-        var computedTotal = 0.0
-        var computedList: [Double] = []
-        for (index, position) in positions.enumerated() {
-            let diff = position.side == .buy
-                ? currents[index] - position.entryPrice
-                : position.entryPrice - currents[index]
-            let computed = diff * position.lots * 100
-            computedTotal += computed
-            computedList.append(computed)
-            if let shown = displayedProfits[index] {
-                let tolerance = max(3.0, abs(shown) * 0.15)
-                // 负号最容易被 OCR 丢（红色负数）：量级对得上、只差
-                // 符号也算对上；合计还有净值−结余与顶部总额两路
-                // 独立参照兜底，不会因此放进坏数据。
-                guard abs(computed - shown) <= tolerance
-                        || abs(computed + shown) <= tolerance else {
-                    throw AppError.message(
-                        "截图持仓对不上（单笔盈亏：重算 \(fmt2(computed))、显示 \(fmt2(shown))），这次没采用"
-                    )
-                }
-            }
-        }
-        // 合计参照尽量多备几个独立来源，任一对上即放行：净值−结余、
-        // 各笔显示盈亏之和、顶部蓝色总盈亏（「53.10 USD」）。单个数字
-        // 被 OCR 读偏时不再一票否决；真读错时三个参照会一致地对不上，
-        // 报错里带上重算值与参照值，一眼能看出哪边错、错多少。
-        var totalChecks: [Double] = []
-        if let equity = findLabeledNumber(
-            in: lines,
-            labels: ["净值"],
-            rejectIfLineContains: ["结余", "预付款", "可用"]
-        ) {
-            totalChecks.append(equity - balance)
-        }
-        if displayedProfits.allSatisfy({ $0 != nil }) {
-            totalChecks.append(displayedProfits.compactMap { $0 }.reduce(0, +))
-        }
-        if let headerTotal = findHeaderTotal(in: lines) {
-            totalChecks.append(headerTotal)
-        }
-        if !totalChecks.isEmpty {
-            let anyMatch = totalChecks.contains {
-                abs(computedTotal - $0) <= max(20.0, abs($0) * 0.20)
-            }
-            guard anyMatch else {
-                let refs = totalChecks.map { fmt2($0) }.joined(separator: "/")
-                let parts = computedList.map { fmt2($0) }.joined(separator: "/")
-                throw AppError.message(
-                    "截图持仓对不上（盈亏合计：重算 \(fmt2(computedTotal))（\(parts)）、参照 \(refs)），这次没采用"
-                )
-            }
-        }
-
-        // 最后一道手数合理性检查：MT5 手数按 0.01 步进，合计手数必须是 0.01 的
-        // 整数倍；OCR 偶发读串（如手数被拼成 0.2675）时整次解析作废，
-        // 自动计算会静默保留上次的好数据，而不是用坏数据覆盖最终价/每行盈亏。
-        let totalLots = positions.reduce(0) { $0 + $1.lots }
-        let scaledTotalLots = totalLots * 100
-        guard abs(scaledTotalLots - scaledTotalLots.rounded()) < 1e-6 else {
-            throw AppError.message("截图里的手数不合理")
         }
 
         return ScreenshotTradeData(balance: balance, margin: margin, positions: positions)
@@ -176,147 +109,86 @@ enum MT5ScreenshotParser {
 
     // MARK: - Positions
 
-    /// 返回持仓、各自配对到的现价与 MT5 在该行显示的盈亏（后两者只供
-    /// parse 里的盈亏交叉校验用，不进 GoldPosition 模型；显示盈亏读
-    /// 不到时为 nil、跳过该笔校验）。
-    private static func extractGoldPositions(
-        from lines: [String]
-    ) throws -> (positions: [GoldPosition], currents: [Double], displayedProfits: [Double?]) {
-        // 第一步：收集全部持仓起点（含 GOLD/XAU 品种的行）。方向+手数就在该行
-        // 上（MT5 排版如「GOLD# sell 0.05」），或紧随的一两行内；查找止于下一个
-        // 品种行，避免把下一笔的方向手数串过来。
-        var starts: [(index: Int, symbol: String, side: PositionSide, lots: Double)] = []
-        for (index, line) in lines.enumerated() {
-            guard let symbol = goldSymbol(in: line) else { continue }
-            var end = min(index + 3, lines.count)
-            var j = index + 1
-            while j < end {
-                if goldSymbol(in: lines[j]) != nil { end = j; break }
-                j += 1
-            }
-            if let sideLots = detectSideAndLots(in: Array(lines[index..<end])) {
-                starts.append((index: index, symbol: symbol, side: sideLots.side, lots: sideLots.lots))
-            }
+    /// 持仓提取（2026-11-19 按 ren 决定重写：只提取、不做盈亏对比）。
+    /// 改走「双流对位」，不再以品种行为锚分区块：OCR 的行组装在 ren
+    /// 手机上会把相邻持仓行并掉，区块锚点法实证漏掉一半持仓（16:13
+    /// 一图四笔只提出两笔，提出的两笔数字全对）。新法在第一个品种行
+    /// 之后的整个持仓区里，分别按出现顺序收集两条流——方向+手数流、
+    /// 黄金价位流（开仓/现价交替）——再逐个对位。行怎么并、盈亏数字
+    /// 漂到哪一行，都不影响两条流的内部顺序。
+    /// 价位流可能多出一个杂质（排头），用「现价各位应当几乎相等」
+    /// 在偏移 0/1 间选更齐的一边定开仓价位。
+    private static func extractGoldPositions(from lines: [String]) -> [GoldPosition] {
+        guard let firstSymbol = lines.firstIndex(where: { goldSymbol(in: $0) != nil }) else {
+            return []
+        }
+        let region = Array(lines[firstSymbol...])
+
+        // 方向+手数流：整段文本上逐个收集（合并行里有两个也照单全收）。
+        let sides = collectSides(in: region.joined(separator: " "))
+        guard !sides.isEmpty else { return [] }
+
+        // 黄金价位流：逐行按出现顺序收集（带 O→0 等数字修复）。
+        var prices: [Double] = []
+        for line in region {
+            prices.append(contentsOf: goldPrices(inLine: line))
         }
 
-        // 第二步：逐笔在自己的区块内取价对（2026-11-19 重构）。区块 =
-        // 本笔品种行到下一笔品种行之前。区块内按出现顺序遇到的前两个
-        // 黄金价位就是开仓价与现价——不依赖箭头符号是否被 OCR 认出、
-        // 不依赖价格行有没有被拆成两行。旧做法（全局收集价对再顺序
-        // 配对）在 ren 的手机上反复栽在同一处：一行价格认不成对时
-        // 后面整体顺移，先是写错均价/手数，改加笔数校验后又变成整次
-        // 作废、识别像坏了。区块内不足两个价位才整次作废（保留旧数据）。
-        // 区块从品种行开始，账户区的结余/净值等大数字在第一笔之前，
-        // 不会落进任何区块；盈亏数字（如 106.40）不在黄金价位区间，
-        // 也不会被误收。
-        var positions: [GoldPosition] = []
-        var currents: [Double] = []
-        for (k, start) in starts.enumerated() {
-            let blockEnd = k + 1 < starts.count ? starts[k + 1].index : lines.count
-            var prices: [Double] = []
-            for line in lines[start.index..<blockEnd] {
-                prices.append(contentsOf: goldPrices(inLine: line))
-            }
-            guard prices.count >= 2 else {
-                throw AppError.message("截图持仓对不上（有持仓的价格没读全），这次没采用")
-            }
-            positions.append(
-                GoldPosition(
-                    symbol: start.symbol,
-                    side: start.side,
-                    lots: start.lots,
-                    entryPrice: prices[0]
-                )
-            )
-            currents.append(prices[1])
+        let pairCount = min(sides.count, prices.count / 2)
+        guard pairCount > 0 else { return [] }
+
+        // 偏移选择：现价在每对的第二位，各笔现价应几乎相同；
+        // 偏移 0 与 1（价位流排头多一个杂质时）比谁的现价更整齐。
+        var offset = 0
+        if prices.count - 2 * pairCount >= 1 {
+            let spread0 = currentSpread(prices: prices, offset: 0, count: pairCount)
+            let spread1 = currentSpread(prices: prices, offset: 1, count: pairCount)
+            if spread1 < spread0 { offset = 1 }
         }
-        // 显示盈亏按「顺序」配对（2026-11-19 15:47 实证修复）：盈亏是
-        // 独立文字块，OCR 排序时行位会上下漂移、跨过品种行边界，按
-        // 区块归属配对必然错位一格（第 1 笔配到第 2 笔的盈亏）。但
-        // 全部盈亏自上而下的先后顺序不会乱，收集后逐个对位即可；
-        // 数量对不上就整组放弃（全 nil），交给合计参照把关。
-        let profits = profitSequence(
-            in: lines,
-            from: starts.first?.index ?? lines.count,
-            lots: starts.map { $0.lots }
-        )
-        let displayedProfits: [Double?] = profits.count == positions.count
-            ? profits.map { Optional($0) }
-            : [Double?](repeating: nil, count: positions.count)
-        return (positions, currents, displayedProfits)
+
+        return (0..<pairCount).map { i in
+            GoldPosition(
+                symbol: "GOLD",
+                side: sides[i].side,
+                lots: sides[i].lots,
+                entryPrice: prices[offset + 2 * i]
+            )
+        }
     }
 
-    /// 持仓区内全部「显示盈亏」候选，按出现顺序：带小数点的数字里
-    /// 排除手数与黄金价位（开仓/现价）后剩下的就是各笔盈亏。要求带
-    /// 小数点，是为了不把品种名里的整数（如 GOLD24-7）误当盈亏。
-    private static func profitSequence(in lines: [String], from: Int, lots: [Double]) -> [Double] {
-        let pattern = try! NSRegularExpression(pattern: #"-?[0-9]+\.[0-9]+"#)
-        var result: [Double] = []
-        guard from < lines.count else { return result }
-        for line in lines[from...] {
-            let ns = line as NSString
-            let full = NSRange(location: 0, length: ns.length)
-            for match in pattern.matches(in: line, options: [], range: full) {
-                guard let value = Double(ns.substring(with: match.range)) else { continue }
-                if lots.contains(where: { abs(abs(value) - $0) < 0.0001 }) { continue }
-                if isGoldPrice(abs(value)) { continue }
-                result.append(value)
-            }
+    /// 某偏移下各笔现价（每对第二位）的极差，用来判断价位流对齐。
+    private static func currentSpread(prices: [Double], offset: Int, count: Int) -> Double {
+        let currents = (0..<count).map { prices[offset + 2 * $0 + 1] }
+        guard let lo = currents.min(), let hi = currents.max() else { return .infinity }
+        return hi - lo
+    }
+
+    /// 在整段文本里按出现顺序收集全部（方向、手数）：手数必须是
+    /// 0.01 步进（小数至多两位），OCR 把手数与后面数字读串时出现的
+    /// 四位小数不采信、跳过该候选继续找。
+    private static func collectSides(in text: String) -> [(side: PositionSide, lots: Double)] {
+        let pattern = #"(?i)\b(buy|sell)\b\s*([0-9]+(?:\.[0-9]+)?)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let ns = text as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        var result: [(side: PositionSide, lots: Double)] = []
+        for match in regex.matches(in: text, options: [], range: full) where match.numberOfRanges >= 3 {
+            let token = ns.substring(with: match.range(at: 2))
+            guard isValidLotsToken(token),
+                  let lots = Double(token), lots > 0, lots < 100 else { continue }
+            let sideRaw = ns.substring(with: match.range(at: 1)).lowercased()
+            result.append((side: sideRaw == "buy" ? .buy : .sell, lots: lots))
         }
         return result
     }
 
-    /// 截图顶部蓝色大字是全部持仓的浮盈合计（如「53.10 USD」），
-    /// 字大、位置固定，OCR 最不容易读错——作盈亏合计的独立参照。
-    private static func findHeaderTotal(in lines: [String]) -> Double? {
-        let pattern = try! NSRegularExpression(
-            pattern: #"(-?[0-9][0-9 ]*(?:\.[0-9]+)?)\s*USD"#
-        )
-        for line in lines.prefix(6) {
-            let ns = line as NSString
-            let full = NSRange(location: 0, length: ns.length)
-            if let match = pattern.firstMatch(in: line, options: [], range: full),
-               match.numberOfRanges >= 2 {
-                let raw = ns.substring(with: match.range(at: 1))
-                    .replacingOccurrences(of: " ", with: "")
-                if let value = Double(raw) { return value }
-            }
-        }
-        return nil
-    }
-
-    private static func fmt2(_ value: Double) -> String {
-        String(format: "%.2f", value)
-    }
-
     private static func goldSymbol(in line: String) -> String? {
-        // No trailing \b: symbols often end with '#' (non-word), which breaks \b.
         let pattern = #"(?i)\b(GOLD[A-Z0-9#._\-]*|XAU[A-Z0-9#._\-]*)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let ns = line as NSString
         let full = NSRange(location: 0, length: ns.length)
         guard let match = regex.firstMatch(in: line, options: [], range: full) else { return nil }
         return ns.substring(with: match.range(at: 1)).uppercased()
-    }
-
-    private static func detectSideAndLots(in lines: [String]) -> (side: PositionSide, lots: Double)? {
-        let text = lines.joined(separator: " ")
-        let pattern = #"(?i)\b(buy|sell)\b\s*([0-9]+(?:\.[0-9]+)?)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let ns = text as NSString
-        let full = NSRange(location: 0, length: ns.length)
-        // 逐个候选检查：手数必须是 0.01 步进（小数至多两位）。OCR 把手数和
-        // 后面的盈亏数字读串时会出现 0.2675 这类四位小数，不能采信，
-        // 跳过这个候选继续找下一个合格的 buy/sell 手数。
-        for match in regex.matches(in: text, options: [], range: full) where match.numberOfRanges >= 3 {
-            let token = ns.substring(with: match.range(at: 2))
-            guard isValidLotsToken(token),
-                  let lots = Double(token), lots > 0, lots < 100 else { continue }
-            let sideRaw = ns.substring(with: match.range(at: 1)).lowercased()
-            let side: PositionSide = sideRaw == "buy" ? .buy : .sell
-            return (side, lots)
-        }
-        return nil
     }
 
     /// MT5 手数按 0.01 步进：整数，或小数部分至多两位（如 0.2 / 0.25 / 1.50）。
