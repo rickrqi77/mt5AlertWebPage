@@ -5,11 +5,12 @@ import SwiftUI
 /// 第一页是时钟页——日期在上、时间在下，居中显示，尺寸适配表盘；
 /// 底部中间只显示金价整数的末两位（如 4019 显示 19），字号 20
 ///（原 15，ren 2026-11-17 要求加大一点）。
-/// 三处文字共用一个亮度值（设定页滑杆 0–100 调，颜色不变、只改明暗）。
+/// 时钟页文字不做 app 内亮度调节，直接用手表系统亮度显示。
 /// 第二页是间隔设定页：顶部中间连接绿点（XAU/USD、Swiss 字样已去），
-/// 间隔选择、亮度进度条（原每边档数的位置；每边档数固定 7 不再
-/// 可选）、最下方是价格刷新间隔选择（0.5/1/3/5/10 秒）。设定页顶部
+/// 间隔选择、最下方是价格刷新间隔选择（0.5/1/3/5/10 秒）。设定页顶部
 /// 的完整价格已去掉（ren 2026-11-16 定），整页不用滚动、一页放下。
+/// 亮度调节已删（ren 2026-11-20 定）：app 不再自定义亮度，
+/// 时钟页文字直接按手表系统亮度显示。
 /// 没有推送按钮：点间隔即直接设定并推送；亮度停改（停下来）后
 /// 自动跳回第一页看效果。无预览框、无分割线，字号与控件高度都压过。
 /// 价格固定 Swiss（打开时 0.5 秒刷新、抬腕激活立刻先刷一次）；
@@ -18,7 +19,6 @@ struct WatchRootView: View {
     @EnvironmentObject private var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
     @State private var selectedPage = 0
-    @State private var jumpBackTask: Task<Void, Never>?
 
     var body: some View {
         TabView(selection: $selectedPage) {
@@ -39,14 +39,16 @@ struct WatchRootView: View {
         }
         .onDisappear { model.stopAutoRefresh() }
         // 抬腕亮屏（app 回到激活态）时立刻先取一次价，不等循环节拍；
-        // 放下手腕变非激活就停循环，省电也避免挂起期间的空转。
-        // 回第一页也在变非激活时就做完（那时屏幕正变暗/熄灭，看不见切换），
-        // 并禁用切换动画：下次亮屏直接停在第一页，没有翻页效果。
+        // 退到后台（手腕放下、屏幕熄灭）就停循环并回第一页（禁用
+        // 切换动画，下次亮屏直接停在第一页）。注意只认 .background：
+        // .inactive 只是临时打断（通知横幅、亮屏过渡），旧版在
+        // .inactive 就打回第一页+清平仓确认态，ren 在平仓页操作中
+        // 被打回首页（2026-11-20 报），故改定只在真正退后台时回。
         .onChange(of: scenePhase) { phase in
             if phase == .active {
                 Task { await model.refreshPrice() }
                 model.startAutoRefresh()
-            } else {
+            } else if phase == .background {
                 model.stopAutoRefresh()
                 model.closeAllPageReset()
                 resetToClockPage()
@@ -74,7 +76,6 @@ struct WatchRootView: View {
                     .font(.system(size: 17, weight: .medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
-                    .opacity(model.brightnessFraction)
                 HStack(alignment: .lastTextBaseline, spacing: 3) {
                     Text(Self.timeFormatter.string(from: context.date))
                         .font(.system(size: 46, weight: .bold, design: .rounded))
@@ -84,13 +85,11 @@ struct WatchRootView: View {
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
                 }
-                .opacity(model.brightnessFraction)
                 Spacer()
                 Text(priceDigits)
                     .font(.system(size: 20, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
-                    .opacity(model.brightnessFraction)
                     .padding(.bottom, 1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -138,7 +137,6 @@ struct WatchRootView: View {
         VStack(spacing: 3) {
             header
             stepPicker
-            brightnessSection
             refreshPicker
             if !model.phoneReachable {
                 Text("推送需要手机在附近并保持连接")
@@ -187,76 +185,6 @@ struct WatchRootView: View {
                         model.pushSelection()
                     }
                 }
-            }
-        }
-    }
-
-    /// 亮度控制（在原「每边档数」的位置）：调第一页日期/时间/价格
-    /// 末两位共用的亮度值（调节中就实时生效于同一个状态值）。
-    /// 不用系统 Slider：ren 2026-11-16 实测它的填充长度和数值对不上
-    /// （85 只显示一点点）。改自绘进度条，填充宽度严格 = 数值/100，
-    /// 拖动条身或转表冠都能调；停改 1.2 秒后自动跳回第一页看效果
-    /// （等价于原 Slider 的松手跳回）。
-    private var brightnessSection: some View {
-        VStack(spacing: 2) {
-            // 这几个字本身也吃同一个亮度值（ren 定）：调节时看字的
-            // 明暗就能当场确认效果，不必先跳回第一页。
-            Text("第一页亮度")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .opacity(model.brightnessFraction)
-            HStack(spacing: 6) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(Color.gray.opacity(0.3))
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(Color.blue)
-                            .frame(width: geo.size.width * CGFloat(model.brightness) / 100)
-                    }
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { drag in
-                                let fraction = min(1, max(0, drag.location.x / geo.size.width))
-                                model.brightness = (fraction * 100).rounded()
-                            }
-                    )
-                }
-                .frame(height: 16)
-                .digitalCrownRotation(
-                    $model.brightness,
-                    from: 0,
-                    through: 100,
-                    by: 1,
-                    sensitivity: .medium,
-                    isContinuous: false,
-                    isHapticFeedbackEnabled: true
-                )
-                // 数值框给足三位数宽度并优先保宽，进度条相应缩短：
-                // 原宽 26 时 100 显示不全（ren 2026-11-17 实测）。
-                Text("\(Int(model.brightness))")
-                    .font(.caption2)
-                    .monospacedDigit()
-                    .lineLimit(1)
-                    .frame(width: 36)
-                    .layoutPriority(1)
-            }
-        }
-        .onChange(of: model.brightness) { _ in
-            scheduleJumpBackToClock()
-        }
-    }
-
-    /// 亮度停改 1.2 秒后跳回第一页；连续调节时每次变化都会顺延。
-    /// 只在人还停在设定页时才跳，避免误拉正在别处操作的手。
-    private func scheduleJumpBackToClock() {
-        jumpBackTask?.cancel()
-        jumpBackTask = Task {
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            if Task.isCancelled { return }
-            if selectedPage == 1 {
-                selectedPage = 0
             }
         }
     }

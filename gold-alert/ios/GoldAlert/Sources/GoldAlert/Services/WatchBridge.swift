@@ -81,4 +81,32 @@ final class WatchBridge: NSObject, WCSessionDelegate {
             reply(["ok": ok, "message": text])
         }
     }
+
+    /// 排队消息（transferUserInfo）：手表在手机 app 没运行时点间隔/
+    /// 全平会走这条通道，消息在手机 app 下次被唤醒/打开时送达。
+    /// setGrid 直接执行同一处理者（无回话，执行结果手机上以 toast
+    /// 显示）；closeAll 带时间戳，只执行 60 秒内的——过期的排队
+    /// 全平宁可丢弃，防旧指令在不合时宜时误平仓。
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveUserInfo userInfo: [String: Any] = [:]
+    ) {
+        let command = userInfo["command"] as? String
+        if command == "closeAll" {
+            let ts = (userInfo["ts"] as? NSNumber)?.doubleValue ?? 0
+            guard Date().timeIntervalSince1970 - ts <= 60 else { return }
+            Task { @MainActor in
+                _ = await WatchBridge.shared.onCloseAll?()
+            }
+            return
+        }
+        guard command == "setGrid",
+              let step = (userInfo["step"] as? NSNumber)?.doubleValue,
+              let perSide = (userInfo["perSide"] as? NSNumber)?.intValue else {
+            return
+        }
+        Task { @MainActor in
+            _ = await WatchBridge.shared.onSetGridCommand?(step, perSide)
+        }
+    }
 }
