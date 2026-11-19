@@ -26,33 +26,48 @@ enum MT5ScreenshotParser {
         }
 
         // Only real OCR lines — do not append the joined blob (that duplicated positions).
-        let (positions, currents) = try extractGoldPositions(from: lines)
+        let (positions, currents, displayedProfits) = try extractGoldPositions(from: lines)
         guard !positions.isEmpty else {
             throw AppError.message("截图里没有 GOLD 持仓")
         }
 
-        // 盈亏交叉校验（第二道防线）：截图自带真值——净值−结余就是全部
-        // 持仓的浮盈合计；按解析出的持仓重算的浮盈与它差太多就整次作废。
-        // 容差必须放宽到 max(20 美元, 20%)：重算不含隔夜利息、截图可能
-        // 没截全持仓列表，第一版用 max(5, 5%) 时正常截图被频繁误杀、
-        // 自动识别看起来像坏了（2026-11-19 ren 实报）。这道校验只负责
-        // 拦「整笔持仓级别」的大错；精确拦截漏读靠 extractGoldPositions
-        // 里的笔数对齐检查。净值没读到时跳过校验。
+        // 盈亏交叉校验（第二道防线）：主校验是逐笔比对——每笔持仓行尾
+        // MT5 自己显示的盈亏，与按解析出的开仓/现价/手数重算的盈亏，
+        // 差超过 max(3 美元, 15%) 即整次作废。合计校验作兜底：重算合计
+        // 与「净值−结余」、或与「各笔显示盈亏之和」任一对得上即放行——
+        // 净值带千分位空格（1 225.93），OCR 分行时开头的「1」容易丢，
+        // 只靠净值一条路时正常截图被误杀（2026-11-19 构建 30–33 连坏
+        // 三轮的实因）；显示盈亏是小数字、无千分位，不吃这个亏。
+        var computedTotal = 0.0
+        for (index, position) in positions.enumerated() {
+            let diff = position.side == .buy
+                ? currents[index] - position.entryPrice
+                : position.entryPrice - currents[index]
+            let computed = diff * position.lots * 100
+            computedTotal += computed
+            if let shown = displayedProfits[index] {
+                let tolerance = max(3.0, abs(shown) * 0.15)
+                guard abs(computed - shown) <= tolerance else {
+                    throw AppError.message("截图持仓对不上（单笔盈亏对不上），这次没采用")
+                }
+            }
+        }
+        var totalChecks: [Double] = []
         if let equity = findLabeledNumber(
             in: lines,
             labels: ["净值"],
             rejectIfLineContains: ["结余", "预付款", "可用"]
         ) {
-            let expected = equity - balance
-            var computed = 0.0
-            for (position, current) in zip(positions, currents) {
-                let diff = position.side == .buy
-                    ? current - position.entryPrice
-                    : position.entryPrice - current
-                computed += diff * position.lots * 100
+            totalChecks.append(equity - balance)
+        }
+        if displayedProfits.allSatisfy({ $0 != nil }) {
+            totalChecks.append(displayedProfits.compactMap { $0 }.reduce(0, +))
+        }
+        if !totalChecks.isEmpty {
+            let anyMatch = totalChecks.contains {
+                abs(computedTotal - $0) <= max(20.0, abs($0) * 0.20)
             }
-            let tolerance = max(20.0, abs(expected) * 0.20)
-            guard abs(computed - expected) <= tolerance else {
+            guard anyMatch else {
                 throw AppError.message("截图持仓对不上（盈亏合计对不上），这次没采用")
             }
         }
@@ -133,11 +148,12 @@ enum MT5ScreenshotParser {
 
     // MARK: - Positions
 
-    /// 返回持仓与各自配对到的现价（现价只供 parse 里的盈亏交叉校验用，
-    /// 不进 GoldPosition 模型）。
+    /// 返回持仓、各自配对到的现价与 MT5 在该行显示的盈亏（后两者只供
+    /// parse 里的盈亏交叉校验用，不进 GoldPosition 模型；显示盈亏读
+    /// 不到时为 nil、跳过该笔校验）。
     private static func extractGoldPositions(
         from lines: [String]
-    ) throws -> (positions: [GoldPosition], currents: [Double]) {
+    ) throws -> (positions: [GoldPosition], currents: [Double], displayedProfits: [Double?]) {
         // 第一步：收集全部持仓起点（含 GOLD/XAU 品种的行）。方向+手数就在该行
         // 上（MT5 排版如「GOLD# sell 0.05」），或紧随的一两行内；查找止于下一个
         // 品种行，避免把下一笔的方向手数串过来。
@@ -167,6 +183,7 @@ enum MT5ScreenshotParser {
         // 也不会被误收。
         var positions: [GoldPosition] = []
         var currents: [Double] = []
+        var displayedProfits: [Double?] = []
         for (k, start) in starts.enumerated() {
             let blockEnd = k + 1 < starts.count ? starts[k + 1].index : lines.count
             var prices: [Double] = []
@@ -185,8 +202,27 @@ enum MT5ScreenshotParser {
                 )
             )
             currents.append(prices[1])
+            displayedProfits.append(displayedProfit(in: lines[start.index], lots: start.lots))
         }
-        return (positions, currents)
+        return (positions, currents, displayedProfits)
+    }
+
+    /// 品种行行尾 MT5 显示的该笔盈亏（如「GOLD# sell 0.1 123.90」的
+    /// 123.90、「-25.20」的负数）。取法：行内带小数点的数字里，排除
+    /// 手数本身与黄金价位，最后一个即盈亏；没有则 nil。要求带小数
+    /// 点，是为了不把品种名里的整数（如 GOLD24-7）误当盈亏。
+    private static func displayedProfit(in line: String, lots: Double) -> Double? {
+        let pattern = try! NSRegularExpression(pattern: #"-?[0-9]+\.[0-9]+"#)
+        let ns = line as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        var profit: Double? = nil
+        for match in pattern.matches(in: line, options: [], range: full) {
+            guard let value = Double(ns.substring(with: match.range)) else { continue }
+            if abs(abs(value) - lots) < 0.0001 { continue }
+            if isGoldPrice(abs(value)) { continue }
+            profit = value
+        }
+        return profit
     }
 
     private static func goldSymbol(in line: String) -> String? {

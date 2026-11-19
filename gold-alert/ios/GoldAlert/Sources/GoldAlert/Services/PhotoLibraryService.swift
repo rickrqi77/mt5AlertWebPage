@@ -82,16 +82,15 @@ enum PhotoLibraryService {
                 let observations = (request.results as? [VNRecognizedTextObservation]) ?? []
                 // Sort top-to-bottom, then left-to-right for MT5 layout.
                 let sorted = observations.sorted { a, b in
-                    let ay = a.boundingBox.midY
-                    let by = b.boundingBox.midY
-                    if abs(ay - by) > 0.015 {
-                        return ay > by
+                    if abs(a.boundingBox.maxY - b.boundingBox.maxY) > 0.01 {
+                        return a.boundingBox.maxY > b.boundingBox.maxY
                     }
                     return a.boundingBox.minX < b.boundingBox.minX
                 }
                 var lines: [String] = []
-                var currentY: CGFloat?
                 var currentLine: [VNRecognizedTextObservation] = []
+                var lineMinY: CGFloat = 0
+                var lineMaxY: CGFloat = 0
 
                 func flush() {
                     guard !currentLine.isEmpty else { return }
@@ -102,12 +101,31 @@ enum PhotoLibraryService {
                     currentLine.removeAll()
                 }
 
+                // 按纵向重叠分行（2026-11-19 改）：旧做法按 midY 距离逐个
+                // 比对会链式漂移——「净值：1 225.93」的千分位「1」是个小
+                // 碎片，midY 偏上，被并进上一行，净值只剩 225.93，盈亏
+                // 校验因此误杀（连坏三版）。同一视觉行的碎片纵向必然
+                // 重叠：与当前行的纵向区间重叠达较矮一方四成即同行。
                 for obs in sorted {
-                    if let y = currentY, abs(obs.boundingBox.midY - y) > 0.018 {
-                        flush()
+                    let box = obs.boundingBox
+                    if currentLine.isEmpty {
+                        currentLine.append(obs)
+                        lineMinY = box.minY
+                        lineMaxY = box.maxY
+                        continue
                     }
-                    currentY = obs.boundingBox.midY
-                    currentLine.append(obs)
+                    let overlap = min(lineMaxY, box.maxY) - max(lineMinY, box.minY)
+                    let minHeight = min(lineMaxY - lineMinY, box.height)
+                    if overlap >= 0.4 * minHeight {
+                        currentLine.append(obs)
+                        lineMinY = min(lineMinY, box.minY)
+                        lineMaxY = max(lineMaxY, box.maxY)
+                    } else {
+                        flush()
+                        currentLine.append(obs)
+                        lineMinY = box.minY
+                        lineMaxY = box.maxY
+                    }
                 }
                 flush()
                 continuation.resume(returning: lines.joined(separator: "\n"))
