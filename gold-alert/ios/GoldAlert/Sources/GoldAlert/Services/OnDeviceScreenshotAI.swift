@@ -1,11 +1,11 @@
 import Foundation
 import FoundationModels
 
-/// iPhone 本机 AI（Apple Intelligence / Foundation Models）整理 OCR 文本：
-/// 本地规则解析失败时的第二层。本机模型只能读文本、看不了图，但规则
-/// 解析栽的多是文本层问题（标签行粘连、千分位空格、个别字认错），
-/// 把 Vision 的原始文本交给它做结构化提取正对症。提取结果回主流程
-/// 后照样过交叉校验才采用。iOS 26 起可用，不可用时静默跳过这一层。
+/// 截图识别的唯一路径（ren 2026-11-19 定）：Vision OCR 出文本后，
+/// 由 iPhone 本机 AI（Apple Intelligence / Foundation Models）做
+/// 结构化提取。本机模型只能读文本、看不了图，但此前的失败多是文本
+/// 层问题（标签行粘连、千分位空格、个别字认错），交给它整理正对症。
+/// 提取结果照样过交叉校验才采用。iOS 26 起可用。
 @available(iOS 26.0, *)
 enum OnDeviceScreenshotAI {
     @Generable

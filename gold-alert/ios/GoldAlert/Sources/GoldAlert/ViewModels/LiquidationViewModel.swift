@@ -159,45 +159,14 @@ final class LiquidationViewModel: ObservableObject {
 
             let image = try await PhotoLibraryService.loadImage(from: asset)
             let ocrText = try await PhotoLibraryService.recognizeText(in: image)
+            // 识别只走 iPhone 本机 AI 一条路（ren 2026-11-19 定，不要
+            // 其他的）：OCR 出文本 → 本机大模型结构化提取 → 交叉校验。
+            // 规则解析与云端视觉 AI 都已撤除。
             let data: ScreenshotTradeData
-            var viaLabel: String? = nil
-            do {
-                data = try MT5ScreenshotParser.parse(ocrText: ocrText)
-            } catch {
-                // 规则解析失败 → 两层 AI 兜底依次上：先 iPhone 本机 AI
-                // 整理 OCR 文本（离线、免费），再云端视觉 AI 直接读图。
-                // 全部失败时把每一层的原因都记进识别记录，不互相遮盖。
-                let localError = error
-                var resolved: ScreenshotTradeData? = nil
-                var onDeviceError: Error? = nil
-                var cloudError: Error? = nil
-                if #available(iOS 26.0, *), OnDeviceScreenshotAI.isAvailable {
-                    do {
-                        resolved = try await Self.parseViaOnDeviceAI(ocrText: ocrText)
-                        viaLabel = "本机AI"
-                    } catch {
-                        onDeviceError = error
-                    }
-                }
-                if resolved == nil {
-                    do {
-                        resolved = try await Self.parseViaAI(image: image)
-                        viaLabel = "AI"
-                    } catch {
-                        cloudError = error
-                    }
-                }
-                guard let resolved else {
-                    var parts = ["本地：\(String(localError.localizedDescription.prefix(40)))"]
-                    if let onDeviceError {
-                        parts.append("本机AI：\(String(onDeviceError.localizedDescription.prefix(30)))")
-                    }
-                    if let cloudError {
-                        parts.append("AI：\(String(cloudError.localizedDescription.prefix(30)))")
-                    }
-                    throw AppError.message(parts.joined(separator: "；"))
-                }
-                data = resolved
+            if #available(iOS 26.0, *), OnDeviceScreenshotAI.isAvailable {
+                data = try await Self.parseViaOnDeviceAI(ocrText: ocrText)
+            } else {
+                throw AppError.message("本机 AI 不可用（需 iOS 26 且 Apple Intelligence 就绪）")
             }
             // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
             Self.saveTradeData(data)
@@ -208,7 +177,7 @@ final class LiquidationViewModel: ObservableObject {
             let calculated = try await Self.calculate(mode: mode, data: data)
             applyResult(calculated)
             setRecognitionNote(
-                "识别成功\(viaLabel.map { "（\($0)）" } ?? "") · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots))"
+                "识别成功 · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots))"
             )
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
 
@@ -220,9 +189,8 @@ final class LiquidationViewModel: ObservableObject {
         }
     }
 
-    /// AI 两层兜底共用的结果整形+校验：把各来源给的原始数字组成持仓，
-    /// 过逐笔盈亏与盈亏合计（对净值−结余）交叉校验才采用——哪个来源
-    /// 读错都宁可不用，与本地规则解析同一标准。
+    /// 本机 AI 提取结果的整形+校验：把原始数字组成持仓，过逐笔盈亏
+    /// 与盈亏合计（对净值−结余）交叉校验才采用——读错宁可不用。
     private struct RawPosition {
         let side: PositionSide
         let lots: Double
@@ -270,7 +238,7 @@ final class LiquidationViewModel: ObservableObject {
         return ScreenshotTradeData(balance: balance, margin: margin, positions: positions)
     }
 
-    /// 第二层兜底：iPhone 本机 AI 整理 OCR 文本（离线、免费）。
+    /// 唯一的识别路径：iPhone 本机 AI 整理 OCR 文本（离线、免费）。
     @available(iOS 26.0, *)
     private static func parseViaOnDeviceAI(ocrText: String) async throws -> ScreenshotTradeData {
         let extracted = try await OnDeviceScreenshotAI.extract(from: ocrText)
@@ -285,48 +253,6 @@ final class LiquidationViewModel: ObservableObject {
             balance: extracted.balance, margin: extracted.margin,
             equity: extracted.equity, raw: raw, source: "本机AI"
         )
-    }
-
-    /// 第三层兜底：云端视觉 AI 直接读图（经自己的服务器）。
-    private static func parseViaAI(image: UIImage) async throws -> ScreenshotTradeData {
-        let token = KeychainStore.readToken()
-        let baseURL = KeychainStore.readBaseURL()
-        guard !token.isEmpty else {
-            throw AppError.message("未登录，AI 兜底不可用")
-        }
-        guard let jpeg = jpegForAI(image) else {
-            throw AppError.message("截图压缩失败")
-        }
-        let payload = try await CloudflareClient.shared.parseScreenshotViaAI(
-            baseURL: baseURL, token: token, imageData: jpeg
-        )
-        let raw: [RawPosition] = payload.positions.compactMap { item in
-            guard let side = PositionSide(rawValue: item.side.lowercased()) else { return nil }
-            return RawPosition(
-                side: side, lots: item.lots, entry: item.entry,
-                current: item.current, profit: item.profit
-            )
-        }
-        return try buildValidated(
-            balance: payload.balance, margin: payload.margin,
-            equity: payload.equity, raw: raw, source: "AI"
-        )
-    }
-
-    /// 发给 AI 的图：宽压到 1100 以内、JPEG 0.7——数字足够清楚，
-    /// 上传与推理都快不少。
-    private static func jpegForAI(_ image: UIImage) -> Data? {
-        var target = image
-        let maxWidth: CGFloat = 1100
-        if image.size.width > maxWidth {
-            let scale = maxWidth / image.size.width
-            let newSize = CGSize(width: maxWidth, height: image.size.height * scale)
-            let renderer = UIGraphicsImageRenderer(size: newSize)
-            target = renderer.image { _ in
-                image.draw(in: CGRect(origin: .zero, size: newSize))
-            }
-        }
-        return target.jpegData(compressionQuality: 0.7)
     }
 
     private func setRecognitionNote(_ text: String) {
