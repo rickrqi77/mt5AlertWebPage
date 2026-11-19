@@ -135,11 +135,12 @@ struct WatchRootView: View {
     // MARK: - 第二页：间隔设定页
 
     /// 设定页布局（ren 2026-11-20 改版）：连接圆点在左上角、内容
-    /// 整体上移；「间隔」标题靠左；按钮加高；间隔区与刷新间隔区
-    /// 之间一条分割线；刷新间隔改两排六档（0.5/1/2、3/5/10）；
-    /// 按钮高度算好让整页正好撑满一屏、不滚动。
+    /// 整体上移；「间隔」标题靠左；间隔区与刷新间隔区之间一条
+    /// 分割线；刷新间隔两排六档（0.5/1/2、3/5/10）。按钮高度
+    /// 初版 38/34 太高、整页溢出把顶部标题和底部都挤出屏外
+    /// （ren 装机构图实报），改 30/28 并收紧间距，整页留出余量。
     private var settingsPage: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 4) {
             header
             stepPicker
             Divider()
@@ -159,6 +160,7 @@ struct WatchRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, 4)
+        .padding(.top, 2)
     }
 
     /// 连接状态点（绿=手机可达、灰=不可达）固定在屏幕左上角；
@@ -179,13 +181,13 @@ struct WatchRootView: View {
                 .foregroundStyle(.secondary)
             LazyVGrid(
                 columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 4
+                spacing: 3
             ) {
                 ForEach(WatchModel.stepChoices, id: \.self) { choice in
                     chip(
                         title: WatchModel.formatStep(choice),
                         selected: model.selectedStep == choice,
-                        height: 38
+                        height: 30
                     ) {
                         // 点间隔 = 直接设定（ren 定不要按钮）：有凭据
                         // 直发服务器、无凭据回退经手机（见 WatchModel）。
@@ -206,14 +208,14 @@ struct WatchRootView: View {
                 .foregroundStyle(.secondary)
             LazyVGrid(
                 columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 4
+                spacing: 3
             ) {
                 ForEach(WatchModel.refreshChoices, id: \.self) { choice in
                     chip(
                         title: WatchModel.formatInterval(choice),
                         selected: model.refreshInterval == choice,
                         fontSize: 14,
-                        height: 34
+                        height: 28
                     ) {
                         model.refreshInterval = choice
                     }
