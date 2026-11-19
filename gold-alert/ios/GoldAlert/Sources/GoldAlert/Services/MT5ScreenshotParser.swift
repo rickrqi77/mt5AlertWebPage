@@ -16,23 +16,61 @@ enum MT5ScreenshotParser {
     /// 供识别记录展示：方向+手数读到几处、黄金价位读到几个，与
     /// GOLD 出现次数对照，一眼看出是哪条流在漏（2026-11-19 构建 49
     /// 实证：文本 GOLD×4、成品只有 2 笔，漏点在提取层而非 OCR）。
-    static func extractionStats(ocrText: String) -> (sides: Int, prices: Int) {
-        let s = streams(from: splitLines(ocrText))
-        return (s.sides.count, s.prices.count)
+    static func extractionStats(
+        ocrText: String
+    ) -> (sides: Int, prices: Int, pairs: [(entry: Double, current: Double)]) {
+        let lines = splitLines(ocrText)
+        let s = streams(from: lines)
+        return (s.sides.count, s.prices.count, pricePairs(from: lines))
+    }
+
+    /// 价位流定对：笔数 = 价位数的一半、再以 GOLD 出现次数封顶
+    /// （ren 的规则：每个 GOLD 一笔）；排头多一个杂质时用现价
+    /// 整齐度在偏移 0/1 间选。每对 = (左价开仓, 右价现价)，平均价
+    /// 只用左价（ren 2026-11-19 明确：右边的实时价不需要）。
+    private static func pricePairs(
+        from lines: [String]
+    ) -> [(entry: Double, current: Double)] {
+        let (_, prices) = streams(from: lines)
+        var pairCount = prices.count / 2
+        if let firstSymbol = lines.firstIndex(where: { goldSymbol(in: $0) != nil }) {
+            let symbolCount = lines[firstSymbol...].reduce(0) {
+                $0 + goldSymbolCount(in: $1)
+            }
+            if symbolCount > 0 {
+                pairCount = min(pairCount, symbolCount)
+            }
+        }
+        guard pairCount > 0 else { return [] }
+        var offset = 0
+        if prices.count - 2 * pairCount >= 1 {
+            let spread0 = currentSpread(prices: prices, offset: 0, count: pairCount)
+            let spread1 = currentSpread(prices: prices, offset: 1, count: pairCount)
+            if spread1 < spread0 { offset = 1 }
+        }
+        return (0..<pairCount).map {
+            (entry: prices[offset + 2 * $0], current: prices[offset + 2 * $0 + 1])
+        }
     }
 
     static func parse(ocrText: String) throws -> ScreenshotTradeData {
         let lines = splitLines(ocrText)
 
-        guard let balance = findLabeledNumber(
-            in: lines,
-            labels: ["结余"],
-            rejectIfLineContains: ["净值", "预付款", "可用"]
-        ) else {
+        // 结余/预付款先走「整段切段」取数：账户区文本按标签出现位置
+        // 切段、取本段第一个数字，不依赖 OCR 把标签和数字拼在同一行
+        // （构建 50 实测同一张图结余时有时无——拼行结果逐次不同，
+        // 行内取数就跟着翻）。旧的行内找法留作兜底。
+        guard let balance = accountValue(in: lines, label: "结余")
+            ?? findLabeledNumber(
+                in: lines,
+                labels: ["结余"],
+                rejectIfLineContains: ["净值", "预付款", "可用"]
+            ) else {
             throw AppError.message("截图里找不到「结余」")
         }
 
-        guard let margin = findMargin(in: lines) else {
+        guard let margin = accountValue(in: lines, label: "预付款")
+            ?? findMargin(in: lines) else {
             throw AppError.message("截图里找不到「预付款」")
         }
 
@@ -48,6 +86,27 @@ enum MT5ScreenshotParser {
     }
 
     // MARK: - Labels
+
+    /// 账户区整段切段取数：把持仓区之前的所有行拼成一段文本，
+    /// 定位标签后，取「本标签到下一个账户标签之间」的第一个数字。
+    /// 标签与数字被 OCR 拼成什么行都不影响。
+    private static func accountValue(in lines: [String], label: String) -> Double? {
+        let accountLines = lines.prefix(while: {
+            goldSymbol(in: $0) == nil && !$0.contains("持仓")
+        })
+        let text = accountLines.joined(separator: " ")
+        guard let labelRange = text.range(of: label) else { return nil }
+        let tail = text[labelRange.upperBound...]
+        var end = tail.endIndex
+        var others = ["结余", "净值", "可用预付款", "预付款比率", "持仓"]
+        if label != "预付款" { others.append("预付款") }
+        for other in others where other != label {
+            if let r = tail.range(of: other), r.lowerBound < end {
+                end = r.lowerBound
+            }
+        }
+        return firstNumber(in: String(tail[..<end]))
+    }
 
     private static func findMargin(in lines: [String]) -> Double? {
         for (index, line) in lines.enumerated() {
@@ -154,27 +213,14 @@ enum MT5ScreenshotParser {
     /// 的持仓方向、手数通常整齐划一，补位不会改均价，手数合计也对。
     /// 价位流排头多一个杂质时，用「现价各位几乎相等」在偏移 0/1
     /// 间选更齐的一边定开仓价位。
+    /// 持仓提取（2026-11-19 按 ren 决定：只提取、不做盈亏对比）。
+    /// 笔数与开仓价来自价位对（pricePairs）；方向+手数按顺序对位，
+    /// 个别笔的 token 被 OCR 读坏缺失时用其余笔的多数派补位（同一
+    /// 账户持仓方向、手数通常整齐划一，补位不改均价、手数合计也对）。
     private static func extractGoldPositions(from lines: [String]) -> [GoldPosition] {
-        let (sides, prices) = streams(from: lines)
-        var pairCount = prices.count / 2
-        // 笔数上限以 GOLD 出现次数为准（ren 的规则：每个 GOLD 是一
-        // 笔交易），防价位流里的杂质凑出多余的对。
-        if let firstSymbol = lines.firstIndex(where: { goldSymbol(in: $0) != nil }) {
-            let symbolCount = lines[firstSymbol...].reduce(0) {
-                $0 + goldSymbolCount(in: $1)
-            }
-            if symbolCount > 0 {
-                pairCount = min(pairCount, symbolCount)
-            }
-        }
-        guard pairCount > 0, !sides.isEmpty else { return [] }
-
-        var offset = 0
-        if prices.count - 2 * pairCount >= 1 {
-            let spread0 = currentSpread(prices: prices, offset: 0, count: pairCount)
-            let spread1 = currentSpread(prices: prices, offset: 1, count: pairCount)
-            if spread1 < spread0 { offset = 1 }
-        }
+        let (sides, _) = streams(from: lines)
+        let pairs = pricePairs(from: lines)
+        guard !pairs.isEmpty, !sides.isEmpty else { return [] }
 
         let majoritySide = sides.map { $0.side }
             .reduce(into: [PositionSide: Int]()) { $0[$1, default: 0] += 1 }
@@ -183,15 +229,15 @@ enum MT5ScreenshotParser {
             .reduce(into: [Double: Int]()) { $0[$1, default: 0] += 1 }
             .max(by: { $0.value < $1.value })?.key ?? sides[0].lots
 
-        return (0..<pairCount).map { i in
-            let s = i < sides.count
+        return pairs.enumerated().map { i, pair in
+            let sd = i < sides.count
                 ? sides[i]
                 : (side: majoritySide, lots: majorityLots)
             return GoldPosition(
                 symbol: "GOLD",
-                side: s.side,
-                lots: s.lots,
-                entryPrice: prices[offset + 2 * i]
+                side: sd.side,
+                lots: sd.lots,
+                entryPrice: pair.entry
             )
         }
     }

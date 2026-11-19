@@ -182,13 +182,19 @@ final class LiquidationViewModel: ObservableObject {
             // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
             Self.saveTradeData(data)
             applyResult(calculated)
-            let entries = data.positions
-                .map { String(format: "%.2f", $0.entryPrice) }
-                .joined(separator: "/")
+            // 结果完整展示（ren 2026-11-19 要求）：每行取的左价连同
+            // 右价一起列出（右价只展示、不参与计算），再把平均价的
+            // 算式原样写出——取了哪个价、怎么算的，一眼可核。
             let goldCount = text.uppercased().components(separatedBy: "GOLD").count - 1
             let stats = MT5ScreenshotParser.extractionStats(ocrText: text)
+            let pairsText = stats.pairs
+                .map { "\(String(format: "%.2f", $0.entry))→\(String(format: "%.2f", $0.current))" }
+                .joined(separator: "｜")
+            let entryList = stats.pairs
+                .map { String(format: "%.2f", $0.entry) }
+                .joined(separator: "+")
             setRecognitionNote(
-                "识别成功 · \(buildLabel) · 图 \(shotLabel) · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots)) · 入 \(entries) · 文本 GOLD×\(goldCount) · 方向×\(stats.sides) · 价位×\(stats.prices)"
+                "识别成功 · \(buildLabel) · 图 \(shotLabel) · \(data.positions.count) 笔 · 取左价 \(pairsText) · 均价 (\(entryList))÷\(data.positions.count)=\(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots)) · GOLD×\(goldCount) · 方向×\(stats.sides) · 价位×\(stats.prices)"
             )
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
 
