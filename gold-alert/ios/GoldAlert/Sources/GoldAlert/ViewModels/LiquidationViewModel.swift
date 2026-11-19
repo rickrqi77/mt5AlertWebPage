@@ -158,24 +158,46 @@ final class LiquidationViewModel: ObservableObject {
             }
 
             let image = try await PhotoLibraryService.loadImage(from: asset)
+            let ocrText = try await PhotoLibraryService.recognizeText(in: image)
             let data: ScreenshotTradeData
-            var viaAI = false
+            var viaLabel: String? = nil
             do {
-                let ocr = try await PhotoLibraryService.recognizeText(in: image)
-                data = try MT5ScreenshotParser.parse(ocrText: ocr)
+                data = try MT5ScreenshotParser.parse(ocrText: ocrText)
             } catch {
-                // 本地 OCR 解析失败（版式/千分位等顽固误读）→ AI 兜底读图。
-                // 两边都失败时把两边的原因都记进识别记录：只报一边会
-                // 把 AI 那侧的卡点（接口/模型/它自己的校验）藏起来。
+                // 规则解析失败 → 两层 AI 兜底依次上：先 iPhone 本机 AI
+                // 整理 OCR 文本（离线、免费），再云端视觉 AI 直接读图。
+                // 全部失败时把每一层的原因都记进识别记录，不互相遮盖。
                 let localError = error
-                do {
-                    data = try await Self.parseViaAI(image: image)
-                    viaAI = true
-                } catch {
-                    let local = String(localError.localizedDescription.prefix(46))
-                    let ai = String(error.localizedDescription.prefix(46))
-                    throw AppError.message("本地：\(local)；AI：\(ai)")
+                var resolved: ScreenshotTradeData? = nil
+                var onDeviceError: Error? = nil
+                var cloudError: Error? = nil
+                if #available(iOS 26.0, *), OnDeviceScreenshotAI.isAvailable {
+                    do {
+                        resolved = try await Self.parseViaOnDeviceAI(ocrText: ocrText)
+                        viaLabel = "本机AI"
+                    } catch {
+                        onDeviceError = error
+                    }
                 }
+                if resolved == nil {
+                    do {
+                        resolved = try await Self.parseViaAI(image: image)
+                        viaLabel = "AI"
+                    } catch {
+                        cloudError = error
+                    }
+                }
+                guard let resolved else {
+                    var parts = ["本地：\(String(localError.localizedDescription.prefix(40)))"]
+                    if let onDeviceError {
+                        parts.append("本机AI：\(String(onDeviceError.localizedDescription.prefix(30)))")
+                    }
+                    if let cloudError {
+                        parts.append("AI：\(String(cloudError.localizedDescription.prefix(30)))")
+                    }
+                    throw AppError.message(parts.joined(separator: "；"))
+                }
+                data = resolved
             }
             // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
             Self.saveTradeData(data)
@@ -186,7 +208,7 @@ final class LiquidationViewModel: ObservableObject {
             let calculated = try await Self.calculate(mode: mode, data: data)
             applyResult(calculated)
             setRecognitionNote(
-                "识别成功\(viaAI ? "（AI）" : "") · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots))"
+                "识别成功\(viaLabel.map { "（\($0)）" } ?? "") · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots))"
             )
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
 
@@ -198,10 +220,74 @@ final class LiquidationViewModel: ObservableObject {
         }
     }
 
-    /// AI 兜底读图：本地 OCR 解析失败时，把截图发到自己的服务器，
-    /// 服务器用视觉 AI 读出结构化数据。AI 的结果同样要过交叉校验
-    /// （逐笔盈亏、盈亏合计对净值−结余）才采用——AI 读错时宁可不用，
-    /// 与本地解析同一标准。
+    /// AI 两层兜底共用的结果整形+校验：把各来源给的原始数字组成持仓，
+    /// 过逐笔盈亏与盈亏合计（对净值−结余）交叉校验才采用——哪个来源
+    /// 读错都宁可不用，与本地规则解析同一标准。
+    private struct RawPosition {
+        let side: PositionSide
+        let lots: Double
+        let entry: Double
+        let current: Double
+        let profit: Double?
+    }
+
+    private static func buildValidated(
+        balance: Double,
+        margin: Double,
+        equity: Double?,
+        raw: [RawPosition],
+        source: String
+    ) throws -> ScreenshotTradeData {
+        guard !raw.isEmpty else {
+            throw AppError.message("\(source) 没读到持仓")
+        }
+        var positions: [GoldPosition] = []
+        var computedTotal = 0.0
+        for item in raw {
+            positions.append(
+                GoldPosition(symbol: "GOLD", side: item.side, lots: item.lots, entryPrice: item.entry)
+            )
+            let diff = item.side == .buy
+                ? item.current - item.entry
+                : item.entry - item.current
+            let computed = diff * item.lots * 100
+            computedTotal += computed
+            if let shown = item.profit,
+               abs(computed - shown) > max(3.0, abs(shown) * 0.15) {
+                throw AppError.message(
+                    "\(source) 结果自相矛盾（单笔盈亏：重算 \(String(format: "%.2f", computed))、显示 \(String(format: "%.2f", shown))）"
+                )
+            }
+        }
+        if let equity {
+            let expected = equity - balance
+            guard abs(computedTotal - expected) <= max(20.0, abs(expected) * 0.20) else {
+                throw AppError.message(
+                    "\(source) 结果自相矛盾（盈亏合计：重算 \(String(format: "%.2f", computedTotal))、参照 \(String(format: "%.2f", expected))）"
+                )
+            }
+        }
+        return ScreenshotTradeData(balance: balance, margin: margin, positions: positions)
+    }
+
+    /// 第二层兜底：iPhone 本机 AI 整理 OCR 文本（离线、免费）。
+    @available(iOS 26.0, *)
+    private static func parseViaOnDeviceAI(ocrText: String) async throws -> ScreenshotTradeData {
+        let extracted = try await OnDeviceScreenshotAI.extract(from: ocrText)
+        let raw: [RawPosition] = extracted.positions.compactMap { item in
+            guard let side = PositionSide(rawValue: item.side.lowercased()) else { return nil }
+            return RawPosition(
+                side: side, lots: item.lots, entry: item.entry,
+                current: item.current, profit: item.profit
+            )
+        }
+        return try buildValidated(
+            balance: extracted.balance, margin: extracted.margin,
+            equity: extracted.equity, raw: raw, source: "本机AI"
+        )
+    }
+
+    /// 第三层兜底：云端视觉 AI 直接读图（经自己的服务器）。
     private static func parseViaAI(image: UIImage) async throws -> ScreenshotTradeData {
         let token = KeychainStore.readToken()
         let baseURL = KeychainStore.readBaseURL()
@@ -214,39 +300,16 @@ final class LiquidationViewModel: ObservableObject {
         let payload = try await CloudflareClient.shared.parseScreenshotViaAI(
             baseURL: baseURL, token: token, imageData: jpeg
         )
-        var positions: [GoldPosition] = []
-        var computedTotal = 0.0
-        for item in payload.positions {
-            guard let side = PositionSide(rawValue: item.side.lowercased()) else { continue }
-            let position = GoldPosition(
-                symbol: "GOLD", side: side, lots: item.lots, entryPrice: item.entry
+        let raw: [RawPosition] = payload.positions.compactMap { item in
+            guard let side = PositionSide(rawValue: item.side.lowercased()) else { return nil }
+            return RawPosition(
+                side: side, lots: item.lots, entry: item.entry,
+                current: item.current, profit: item.profit
             )
-            positions.append(position)
-            let diff = side == .buy
-                ? item.current - item.entry
-                : item.entry - item.current
-            let computed = diff * item.lots * 100
-            computedTotal += computed
-            if let shown = item.profit,
-               abs(computed - shown) > max(3.0, abs(shown) * 0.15) {
-                throw AppError.message(
-                    "AI 结果自相矛盾（单笔盈亏：重算 \(String(format: "%.2f", computed))、显示 \(String(format: "%.2f", shown))）"
-                )
-            }
         }
-        guard !positions.isEmpty else {
-            throw AppError.message("AI 没读到持仓")
-        }
-        if let equity = payload.equity {
-            let expected = equity - payload.balance
-            guard abs(computedTotal - expected) <= max(20.0, abs(expected) * 0.20) else {
-                throw AppError.message(
-                    "AI 结果自相矛盾（盈亏合计：重算 \(String(format: "%.2f", computedTotal))、参照 \(String(format: "%.2f", expected))）"
-                )
-            }
-        }
-        return ScreenshotTradeData(
-            balance: payload.balance, margin: payload.margin, positions: positions
+        return try buildValidated(
+            balance: payload.balance, margin: payload.margin,
+            equity: payload.equity, raw: raw, source: "AI"
         )
     }
 

@@ -126,9 +126,18 @@ enum MT5ScreenshotParser {
         rejectIfLineContains: [String]
     ) -> Double? {
         for (index, line) in lines.enumerated() {
-            if rejectIfLineContains.contains(where: { line.contains($0) }) { continue }
             for label in labels where line.contains(label) {
-                if let n = firstNumber(in: line.replacingOccurrences(of: label, with: " ")) {
+                guard let labelRange = line.range(of: label) else { continue }
+                var after = String(line[labelRange.upperBound...])
+                // OCR 把相邻两行拼成一行时（如「结余： 857.83 净值：
+                // 910.93」），只取到下一个标签之前——旧做法整行跳过，
+                // 会连「结余」都找不到、第一步就报废（2026-11-19 实证）。
+                for reject in rejectIfLineContains {
+                    if let r = after.range(of: reject) {
+                        after = String(after[..<r.lowerBound])
+                    }
+                }
+                if let n = firstNumber(in: after) {
                     return n
                 }
                 if let n = numberAfterLabel(lines: lines, index: index, label: label) {
