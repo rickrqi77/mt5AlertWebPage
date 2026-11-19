@@ -221,8 +221,6 @@ async function handleApi(request, env, url) {
   if (method === "POST" && path === "/api/command") {
     return await createCommand(request, env);
   }
-    return await parseScreenshot(request, env);
-  }
 
   return json({ error: "Not found" }, 404);
 }
@@ -1179,12 +1177,3 @@ function corsHeaders() {
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Token",
   };
 }
-
-// ---------------------------------------------------------------------------
-// AI screenshot parsing: fallback for the app when on-device OCR checks
-// fail. The app POSTs a JPEG (base64) of the MT5 trade screen; a vision
-// model reads it and returns structured numbers. The app re-validates
-// the numbers with the same profit cross-checks before using them.
-// ---------------------------------------------------------------------------
-
-
