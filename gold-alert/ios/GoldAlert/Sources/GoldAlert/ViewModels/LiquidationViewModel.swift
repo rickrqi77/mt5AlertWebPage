@@ -150,26 +150,41 @@ final class LiquidationViewModel: ObservableObject {
             return
         }
 
+        // 记录里要标明读的是哪张图（ren 2026-11-19 要求）：截图的
+        // 创建时间 + 读到的开仓价清单，让他能对着相册核对读没读对图、
+        // 漏没漏笔。shotLabel/ocrText 提到 do 外，失败时也能写进记录。
+        var shotLabel = "未知"
+        var ocrText: String? = nil
         do {
             let asset = try PhotoLibraryService.fetchLatestScreenshotAsset()
+            if let created = asset.creationDate {
+                let df = DateFormatter()
+                df.dateFormat = "MM-dd HH:mm"
+                shotLabel = df.string(from: created)
+            }
             // 同一张图已成功算过（删除失败时会残留）：不重复计算、也不重复弹删除确认。
             if asset.localIdentifier == UserDefaults.standard.string(forKey: Self.processedAssetKey) {
                 return
             }
 
             let image = try await PhotoLibraryService.loadImage(from: asset)
-            let ocrText = try await PhotoLibraryService.recognizeText(in: image)
-            // 识别回到纯 OCR 规则解析（ren 2026-11-19 定，AI 全部删除）：
-            // Vision OCR 出文本 → MT5ScreenshotParser 按区块提取并交叉
-            // 校验，失败即不采用、不动已存数据。
-            let data = try MT5ScreenshotParser.parse(ocrText: ocrText)
+            let text = try await PhotoLibraryService.recognizeText(in: image)
+            ocrText = text
+            // 识别回到纯 OCR 规则解析（ren 2026-11-19 定，AI 全部删除、
+            // 盈亏对比也已按他要求删除）：Vision OCR 出文本 →
+            // MT5ScreenshotParser 双流提取，失败即不采用、不动已存数据。
+            let data = try MT5ScreenshotParser.parse(ocrText: text)
             // 先算成功才存：计算中途失败绝不能覆盖上次的好数据。
             let calculated = try await Self.calculate(mode: mode, data: data)
             // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
             Self.saveTradeData(data)
             applyResult(calculated)
+            let entries = data.positions
+                .map { String(format: "%.2f", $0.entryPrice) }
+                .joined(separator: "/")
+            let goldCount = text.uppercased().components(separatedBy: "GOLD").count - 1
             setRecognitionNote(
-                "识别成功 · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots))"
+                "识别成功 · 图 \(shotLabel) · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots)) · 入 \(entries) · 文本 GOLD×\(goldCount)"
             )
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
 
@@ -177,7 +192,14 @@ final class LiquidationViewModel: ObservableObject {
             try? await PhotoLibraryService.deleteAsset(asset)
         } catch {
             // 静默：不提示、不清旧结果；但把失败原因记下来供明细页查看。
-            setRecognitionNote("识别失败 · \(error.localizedDescription)")
+            // 附上 OCR 文本里 GOLD 出现次数：图里有几笔、文本读到几处，
+            // 一眼能分清是读错图、OCR 漏行还是解析漏提。
+            var message = "识别失败 · 图 \(shotLabel) · \(error.localizedDescription)"
+            if let text = ocrText {
+                let goldCount = text.uppercased().components(separatedBy: "GOLD").count - 1
+                message += " · 文本 GOLD×\(goldCount)"
+            }
+            setRecognitionNote(message)
         }
     }
 

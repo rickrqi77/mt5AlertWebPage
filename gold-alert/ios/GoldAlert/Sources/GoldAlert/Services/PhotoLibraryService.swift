@@ -17,12 +17,16 @@ enum PhotoLibraryService {
         }
     }
 
-    /// Latest asset in the Screenshots album; falls back to latest camera-roll image.
+    /// 最新的一张图：截图相册与全部照片各取最新，按创建时间取更新的
+    /// 一张。旧做法只看截图相册、相册非空就不回退——MT5 图片若是经
+    /// 分享/保存进相册的（不在截图相册里），app 会一直读一张旧截图，
+    /// 画面再新也认不到（2026-11-19 ren 要求记录里标明读的是哪张图）。
     static func fetchLatestScreenshotAsset() throws -> PHAsset {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.fetchLimit = 1
 
+        var candidates: [PHAsset] = []
         let albums = PHAssetCollection.fetchAssetCollections(
             with: .smartAlbum,
             subtype: .smartAlbumScreenshots,
@@ -31,15 +35,20 @@ enum PhotoLibraryService {
         if let album = albums.firstObject {
             let assets = PHAsset.fetchAssets(in: album, options: options)
             if let asset = assets.firstObject {
-                return asset
+                candidates.append(asset)
             }
         }
-
         let all = PHAsset.fetchAssets(with: .image, options: options)
-        guard let asset = all.firstObject else {
+        if let asset = all.firstObject {
+            candidates.append(asset)
+        }
+
+        guard let latest = candidates.max(by: {
+            ($0.creationDate ?? .distantPast) < ($1.creationDate ?? .distantPast)
+        }) else {
             throw AppError.message("相册里没有可读取的截图")
         }
-        return asset
+        return latest
     }
 
     static func loadImage(from asset: PHAsset) async throws -> UIImage {
