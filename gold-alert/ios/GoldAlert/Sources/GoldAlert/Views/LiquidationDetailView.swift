@@ -71,6 +71,16 @@ struct LiquidationDetailView: View {
                         Text("最终价（\(liquidation.mode.rawValue)）")
                     }
                 }
+
+                Section("最近一次截图识别") {
+                    Text(
+                        liquidation.lastRecognitionNote.isEmpty
+                            ? "还没有识别记录"
+                            : liquidation.lastRecognitionNote
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                }
             }
             .navigationTitle("最终价计算")
             .navigationBarTitleDisplayMode(.inline)

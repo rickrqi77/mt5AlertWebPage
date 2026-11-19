@@ -9,6 +9,13 @@ final class LiquidationViewModel: ObservableObject {
     private static let processedAssetKey = "lastProcessedScreenshotID_v1"
     private static let tradeDataKey = "lastScreenshotTradeData_v1"
     private static let usdJpyRateKey = "lastUSDJPYRate_v1"
+    private static let recognitionNoteKey = "lastRecognitionNote_v1"
+
+    /// 最近一次截图识别的结果说明（成功写读到的笔数/均价/手数，失败写
+    /// 失败在哪一步），持久化并显示在最终价明细页底部。识别失败历来是
+    /// 静默保留旧数据，2026-11-19 连续几轮「识别不动」全靠猜——留这条
+    /// 记录后，一眼就能定位是取图、OCR 还是解析哪一步出的问题。
+    @Published private(set) var lastRecognitionNote: String = ""
 
     @Published var mode: LiquidationMode
     @Published var busy = false
@@ -38,6 +45,7 @@ final class LiquidationViewModel: ObservableObject {
         } else {
             mode = .usd
         }
+        lastRecognitionNote = UserDefaults.standard.string(forKey: Self.recognitionNoteKey) ?? ""
         lastLiquidationPrice = UserDefaults.standard.object(forKey: Self.lastPriceKey) as? Double ?? 0
         totalLots = Self.loadTradeData()?.totalLots ?? 0
         usdJpyRate = UserDefaults.standard.object(forKey: Self.usdJpyRateKey) as? Double ?? 0
@@ -137,7 +145,10 @@ final class LiquidationViewModel: ObservableObject {
         defer { busy = false }
 
         let allowed = await PhotoLibraryService.requestAccess()
-        guard allowed else { return }
+        guard allowed else {
+            setRecognitionNote("识别失败 · 没有相册权限")
+            return
+        }
 
         do {
             let asset = try PhotoLibraryService.fetchLatestScreenshotAsset()
@@ -157,13 +168,25 @@ final class LiquidationViewModel: ObservableObject {
 
             let calculated = try await Self.calculate(mode: mode, data: data)
             applyResult(calculated)
+            setRecognitionNote(
+                "识别成功 · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots))"
+            )
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
 
             // 删除已用截图；失败也静默（结果已保存，下次打开靠 processedAssetKey 跳过）。
             try? await PhotoLibraryService.deleteAsset(asset)
         } catch {
-            // 静默：不提示、不清旧结果。
+            // 静默：不提示、不清旧结果；但把失败原因记下来供明细页查看。
+            setRecognitionNote("识别失败 · \(error.localizedDescription)")
         }
+    }
+
+    private func setRecognitionNote(_ text: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        let note = "\(formatter.string(from: Date())) \(text)"
+        lastRecognitionNote = note
+        UserDefaults.standard.set(note, forKey: Self.recognitionNoteKey)
     }
 
     private func applyResult(_ calculated: LiquidationResult) {

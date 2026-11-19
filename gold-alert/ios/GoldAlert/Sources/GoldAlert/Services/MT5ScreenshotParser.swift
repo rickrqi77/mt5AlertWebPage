@@ -53,7 +53,7 @@ enum MT5ScreenshotParser {
             }
             let tolerance = max(20.0, abs(expected) * 0.20)
             guard abs(computed - expected) <= tolerance else {
-                throw AppError.message("截图持仓对不上，这次没采用")
+                throw AppError.message("截图持仓对不上（盈亏合计对不上），这次没采用")
             }
         }
 
@@ -174,7 +174,7 @@ enum MT5ScreenshotParser {
                 prices.append(contentsOf: goldPrices(inLine: line))
             }
             guard prices.count >= 2 else {
-                throw AppError.message("截图持仓对不上，这次没采用")
+                throw AppError.message("截图持仓对不上（有持仓的价格没读全），这次没采用")
             }
             positions.append(
                 GoldPosition(
