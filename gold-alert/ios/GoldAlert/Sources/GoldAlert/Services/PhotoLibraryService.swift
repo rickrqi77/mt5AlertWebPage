@@ -17,16 +17,12 @@ enum PhotoLibraryService {
         }
     }
 
-    /// 最新的一张图：截图相册与全部照片各取最新，按创建时间取更新的
-    /// 一张。旧做法只看截图相册、相册非空就不回退——MT5 图片若是经
-    /// 分享/保存进相册的（不在截图相册里），app 会一直读一张旧截图，
-    /// 画面再新也认不到（2026-11-19 ren 要求记录里标明读的是哪张图）。
+    /// Latest asset in the Screenshots album; falls back to latest camera-roll image.
     static func fetchLatestScreenshotAsset() throws -> PHAsset {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
         options.fetchLimit = 1
 
-        var candidates: [PHAsset] = []
         let albums = PHAssetCollection.fetchAssetCollections(
             with: .smartAlbum,
             subtype: .smartAlbumScreenshots,
@@ -35,20 +31,15 @@ enum PhotoLibraryService {
         if let album = albums.firstObject {
             let assets = PHAsset.fetchAssets(in: album, options: options)
             if let asset = assets.firstObject {
-                candidates.append(asset)
+                return asset
             }
         }
-        let all = PHAsset.fetchAssets(with: .image, options: options)
-        if let asset = all.firstObject {
-            candidates.append(asset)
-        }
 
-        guard let latest = candidates.max(by: {
-            ($0.creationDate ?? .distantPast) < ($1.creationDate ?? .distantPast)
-        }) else {
+        let all = PHAsset.fetchAssets(with: .image, options: options)
+        guard let asset = all.firstObject else {
             throw AppError.message("相册里没有可读取的截图")
         }
-        return latest
+        return asset
     }
 
     static func loadImage(from asset: PHAsset) async throws -> UIImage {
@@ -77,87 +68,23 @@ enum PhotoLibraryService {
         }
     }
 
-    static func recognizeText(in image: UIImage) async throws -> String {
-        guard let cgImage = image.cgImage else {
-            throw AppError.message("截图格式无法识别")
-        }
+    /// 一次 Vision 识别的最小结果：整图归一化坐标的包围盒 + 文本。
+    private struct Obs {
+        var box: CGRect
+        var text: String
+    }
 
-        return try await withCheckedThrowingContinuation { continuation in
+    private static func observe(cgImage: CGImage) async throws -> [Obs] {
+        try await withCheckedThrowingContinuation { continuation in
             let request = VNRecognizeTextRequest { request, error in
                 if let error {
                     continuation.resume(throwing: error)
                     return
                 }
                 let observations = (request.results as? [VNRecognizedTextObservation]) ?? []
-                // Sort top-to-bottom, then left-to-right for MT5 layout.
-                let sorted = observations.sorted { a, b in
-                    if abs(a.boundingBox.maxY - b.boundingBox.maxY) > 0.01 {
-                        return a.boundingBox.maxY > b.boundingBox.maxY
-                    }
-                    return a.boundingBox.minX < b.boundingBox.minX
-                }
-                var lines: [String] = []
-                var currentLine: [VNRecognizedTextObservation] = []
-                var lineMinY: CGFloat = 0
-                var lineMaxY: CGFloat = 0
-                var groupHasSymbol = false
-
-                func flush() {
-                    guard !currentLine.isEmpty else { return }
-                    let parts = currentLine.sorted { $0.boundingBox.minX < $1.boundingBox.minX }
-                        .compactMap { $0.topCandidates(1).first?.string }
-                    let joined = parts.joined(separator: " ").trimmingCharacters(in: .whitespaces)
-                    if !joined.isEmpty { lines.append(joined) }
-                    currentLine.removeAll()
-                    groupHasSymbol = false
-                }
-
-                // 按纵向重叠分行（2026-11-19 改）：旧做法按 midY 距离逐个
-                // 比对会链式漂移——「净值：1 225.93」的千分位「1」是个小
-                // 碎片，midY 偏上，被并进上一行，净值只剩 225.93，盈亏
-                // 校验因此误杀（连坏三版）。同一视觉行的碎片纵向必然
-                // 重叠：与当前行的纵向区间重叠达较矮一方四成即同行。
-                for obs in sorted {
-                    let box = obs.boundingBox
-                    // 一笔持仓以品种行开头：当前组里已有品种行时，再来
-                    // 一个品种行必须另起一组——纵向区间随成员增长会把
-                    // 下一笔的品种行「够」进来并成一行，解析因此漏笔
-                    // （2026-11-19 四笔只认两笔的实因之一）。
-                    let obsText = obs.topCandidates(1).first?.string ?? ""
-                    let upper = obsText.uppercased()
-                    let isSymbol = upper.contains("GOLD") || upper.contains("XAU")
-                    if currentLine.isEmpty {
-                        currentLine.append(obs)
-                        lineMinY = box.minY
-                        lineMaxY = box.maxY
-                        groupHasSymbol = isSymbol
-                        continue
-                    }
-                    if isSymbol && groupHasSymbol {
-                        flush()
-                        currentLine.append(obs)
-                        lineMinY = box.minY
-                        lineMaxY = box.maxY
-                        groupHasSymbol = true
-                        continue
-                    }
-                    let overlap = min(lineMaxY, box.maxY) - max(lineMinY, box.minY)
-                    let minHeight = min(lineMaxY - lineMinY, box.height)
-                    if overlap >= 0.4 * minHeight {
-                        currentLine.append(obs)
-                        lineMinY = min(lineMinY, box.minY)
-                        lineMaxY = max(lineMaxY, box.maxY)
-                        groupHasSymbol = groupHasSymbol || isSymbol
-                    } else {
-                        flush()
-                        currentLine.append(obs)
-                        lineMinY = box.minY
-                        lineMaxY = box.maxY
-                        groupHasSymbol = isSymbol
-                    }
-                }
-                flush()
-                continuation.resume(returning: lines.joined(separator: "\n"))
+                continuation.resume(returning: observations.map {
+                    Obs(box: $0.boundingBox, text: $0.topCandidates(1).first?.string ?? "")
+                })
             }
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = false
@@ -170,6 +97,134 @@ enum PhotoLibraryService {
                 continuation.resume(throwing: error)
             }
         }
+    }
+
+    static func recognizeText(in image: UIImage) async throws -> String {
+        guard let cgImage = image.cgImage else {
+            throw AppError.message("截图格式无法识别")
+        }
+
+        // 整图先识别一遍。
+        var all = try await observe(cgImage: cgImage)
+
+        // 再逐条带识别并合并（2026-11-19 ren 指出每行交易间距相同、
+        // 不许漏）：整图一遍在 ren 手机上反复整行漏掉持仓（第 2、4 笔
+        // 没读坏、是根本没进结果）。把整图切成互相重叠的横条逐条识
+        // 别，每条里只有一两行字，无从漏起；结果换算回整图坐标合并。
+        let stripHeight: CGFloat = 0.08
+        let stripStep: CGFloat = 0.04
+        var stripMinY: CGFloat = 0
+        while stripMinY < 1.0 {
+            let band = CGRect(
+                x: 0, y: stripMinY, width: 1,
+                height: min(stripHeight, 1 - stripMinY)
+            )
+            if let crop = cropImage(cgImage, visionBand: band) {
+                let local = try await observe(cgImage: crop)
+                for o in local {
+                    let globalBox = CGRect(
+                        x: o.box.minX,
+                        y: band.minY + o.box.minY * band.height,
+                        width: o.box.width,
+                        height: o.box.height * band.height
+                    )
+                    all.append(Obs(box: globalBox, text: o.text))
+                }
+            }
+            stripMinY += stripStep
+        }
+
+        // 去重：整图与条带、相邻条带会重复读到同一行。按包围盒判同：
+        // 中心纵距 < 0.012 且横距 < 0.05 视为同一处文字，只留先到的
+        // （整图结果在前）。相邻持仓行纵距约 0.073，不会误杀。
+        var unique: [Obs] = []
+        for o in all where !o.text.trimmingCharacters(in: .whitespaces).isEmpty {
+            if unique.contains(where: {
+                abs($0.box.midY - o.box.midY) < 0.012
+                    && abs($0.box.midX - o.box.midX) < 0.05
+            }) {
+                continue
+            }
+            unique.append(o)
+        }
+        return assembleLines(unique)
+    }
+
+    /// 按 Vision 归一化坐标（原点在左下）裁出一条横带。
+    private static func cropImage(_ cgImage: CGImage, visionBand band: CGRect) -> CGImage? {
+        let w = CGFloat(cgImage.width)
+        let h = CGFloat(cgImage.height)
+        let rect = CGRect(
+            x: 0,
+            y: (1 - band.maxY) * h,
+            width: w,
+            height: band.height * h
+        ).integral.intersection(CGRect(x: 0, y: 0, width: w, height: h))
+        guard rect.height >= 8 else { return nil }
+        return cgImage.cropping(to: rect)
+    }
+
+    /// 把识别碎片按纵向重叠拼成行（自上而下）。同一视觉行的碎片纵向
+    /// 必然重叠：与当前行区间重叠达较矮一方四成即同行；一组里已有
+    /// 品种行时，下一个品种行强制另起一组（每个 GOLD 独占一笔）。
+    private static func assembleLines(_ observations: [Obs]) -> String {
+        let sorted = observations.sorted { a, b in
+            if abs(a.box.maxY - b.box.maxY) > 0.01 {
+                return a.box.maxY > b.box.maxY
+            }
+            return a.box.minX < b.box.minX
+        }
+        var lines: [String] = []
+        var currentLine: [Obs] = []
+        var lineMinY: CGFloat = 0
+        var lineMaxY: CGFloat = 0
+        var groupHasSymbol = false
+
+        func flush() {
+            guard !currentLine.isEmpty else { return }
+            let parts = currentLine.sorted { $0.box.minX < $1.box.minX }.map { $0.text }
+            let joined = parts.joined(separator: " ").trimmingCharacters(in: .whitespaces)
+            if !joined.isEmpty { lines.append(joined) }
+            currentLine.removeAll()
+            groupHasSymbol = false
+        }
+
+        for obs in sorted {
+            let box = obs.box
+            let upper = obs.text.uppercased()
+            let isSymbol = upper.contains("GOLD") || upper.contains("XAU")
+            if currentLine.isEmpty {
+                currentLine.append(obs)
+                lineMinY = box.minY
+                lineMaxY = box.maxY
+                groupHasSymbol = isSymbol
+                continue
+            }
+            if isSymbol && groupHasSymbol {
+                flush()
+                currentLine.append(obs)
+                lineMinY = box.minY
+                lineMaxY = box.maxY
+                groupHasSymbol = true
+                continue
+            }
+            let overlap = min(lineMaxY, box.maxY) - max(lineMinY, box.minY)
+            let minHeight = min(lineMaxY - lineMinY, box.height)
+            if overlap >= 0.4 * minHeight {
+                currentLine.append(obs)
+                lineMinY = min(lineMinY, box.minY)
+                lineMaxY = max(lineMaxY, box.maxY)
+                groupHasSymbol = groupHasSymbol || isSymbol
+            } else {
+                flush()
+                currentLine.append(obs)
+                lineMinY = box.minY
+                lineMaxY = box.maxY
+                groupHasSymbol = isSymbol
+            }
+        }
+        flush()
+        return lines.joined(separator: "\n")
     }
 
     static func deleteAsset(_ asset: PHAsset) async throws {
