@@ -221,7 +221,6 @@ async function handleApi(request, env, url) {
   if (method === "POST" && path === "/api/command") {
     return await createCommand(request, env);
   }
-  if (method === "POST" && path === "/api/parse-screenshot") {
     return await parseScreenshot(request, env);
   }
 
@@ -1188,80 +1187,4 @@ function corsHeaders() {
 // the numbers with the same profit cross-checks before using them.
 // ---------------------------------------------------------------------------
 
-async function parseScreenshot(request, env) {
-  if (!env.AI) {
-    return json({ error: "AI 未启用" }, 501);
-  }
-  let body;
-  try {
-    body = await request.json();
-  } catch (_) {
-    return json({ error: "请求格式不对" }, 400);
-  }
-  const b64 = String((body && body.image) || "");
-  if (!b64) {
-    return json({ error: "没有图片" }, 400);
-  }
-  let binary;
-  try {
-    binary = atob(b64);
-  } catch (_) {
-    return json({ error: "图片编码不对" }, 400);
-  }
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
 
-  const prompt = [
-    "这是一张 MetaTrader 5 交易页面截图。请精确读取数据，只输出一个 JSON 对象，不要输出任何其他文字，不要用代码块包裹：",
-    '{"balance": 结余数字, "equity": 净值数字, "margin": 预付款数字, "positions": [{"side": "buy或sell", "lots": 手数, "entry": 开仓价, "current": 现价, "profit": 该笔盈亏}]}',
-    "要求：1) 数字不带千分位空格或逗号，如 1 262.23 写成 1262.23；2) positions 只含 GOLD 或 XAU 品种持仓，按截图从上到下的顺序；3) profit 保留正负号；4) 某个字段读不到就填 null。",
-  ].join("\n");
-
-  let result;
-  try {
-    result = await env.AI.run("@cf/llava-hf/llava-1.5-7b-hf", {
-      image: [...bytes],
-      prompt: prompt,
-      max_tokens: 1024,
-    });
-  } catch (e) {
-    return json({ error: "AI 调用失败：" + (e && e.message ? e.message : String(e)) }, 502);
-  }
-  const text = String((result && result.response) || "");
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end <= start) {
-    return json({ error: "AI 没返回结构化结果", raw: text.slice(0, 300) }, 502);
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(text.slice(start, end + 1));
-  } catch (_) {
-    return json({ error: "AI 结果解析失败", raw: text.slice(0, 300) }, 502);
-  }
-  const num = (v) => {
-    const n = typeof v === "string" ? parseFloat(v.replace(/[,\s]/g, "")) : Number(v);
-    return Number.isFinite(n) ? n : null;
-  };
-  const positions = (Array.isArray(parsed.positions) ? parsed.positions : [])
-    .map((p) => ({
-      side: String((p && p.side) || "").toLowerCase().indexOf("b") === 0 ? "buy" : "sell",
-      lots: num(p && p.lots),
-      entry: num(p && p.entry),
-      current: num(p && p.current),
-      profit: num(p && p.profit),
-    }))
-    .filter((p) => p.lots && p.entry && p.current);
-  const out = {
-    balance: num(parsed.balance),
-    equity: num(parsed.equity),
-    margin: num(parsed.margin),
-    positions: positions,
-  };
-  if (!out.balance || !out.margin || positions.length === 0) {
-    return json({ error: "AI 结果不完整", raw: text.slice(0, 300) }, 502);
-  }
-  return json(out);
-}
