@@ -1221,7 +1221,7 @@ async function parseScreenshot(request, env) {
 
   let result;
   try {
-    result = await env.AI.run("@cf/meta/llama-3.2-11b-vision-instruct", {
+    result = await env.AI.run("@cf/llava-hf/llava-1.5-7b-hf", {
       image: [...bytes],
       prompt: prompt,
       max_tokens: 1024,
