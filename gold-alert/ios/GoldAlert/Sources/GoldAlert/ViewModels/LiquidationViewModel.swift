@@ -212,20 +212,33 @@ final class LiquidationViewModel: ObservableObject {
         var positions: [GoldPosition] = []
         var computedTotal = 0.0
         for item in raw {
-            positions.append(
-                GoldPosition(symbol: "GOLD", side: item.side, lots: item.lots, entryPrice: item.entry)
-            )
-            let diff = item.side == .buy
+            var side = item.side
+            let diff = side == .buy
                 ? item.current - item.entry
                 : item.entry - item.current
-            let computed = diff * item.lots * 100
-            computedTotal += computed
-            if let shown = item.profit,
-               abs(computed - shown) > max(3.0, abs(shown) * 0.15) {
-                throw AppError.message(
-                    "\(source) 结果自相矛盾（单笔盈亏：重算 \(String(format: "%.2f", computed))、显示 \(String(format: "%.2f", shown))）"
-                )
+            var computed = diff * item.lots * 100
+            if let shown = item.profit {
+                let tolerance = max(3.0, abs(shown) * 0.15)
+                if abs(computed - shown) > tolerance {
+                    // 只差一个符号：AI 把方向标反了（它给的盈亏符号与
+                    // 价格关系一致地指向相反方向）。以盈亏为准纠正
+                    // 方向再采用——开仓价不动，平均价不受影响；纠正
+                    // 后还要过下面的合计校验兜底（2026-11-19 实证：
+                    // 重算 113.40、显示 -113.40 被整单误杀）。
+                    if abs(computed + shown) <= tolerance {
+                        side = side == .buy ? .sell : .buy
+                        computed = -computed
+                    } else {
+                        throw AppError.message(
+                            "\(source) 结果自相矛盾（单笔盈亏：重算 \(String(format: "%.2f", computed))、显示 \(String(format: "%.2f", shown))）"
+                        )
+                    }
+                }
             }
+            positions.append(
+                GoldPosition(symbol: "GOLD", side: side, lots: item.lots, entryPrice: item.entry)
+            )
+            computedTotal += computed
         }
         if let equity {
             let expected = equity - balance

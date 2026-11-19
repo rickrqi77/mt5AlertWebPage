@@ -10,7 +10,7 @@ import FoundationModels
 enum OnDeviceScreenshotAI {
     @Generable
     struct ExtractedPosition {
-        @Guide(description: "方向：buy 或 sell")
+        @Guide(description: "方向：buy 或 sell（sell 时现价高于开仓价则盈亏为负，buy 时相反，方向须与盈亏符号一致）")
         var side: String
         @Guide(description: "手数，如 0.1")
         var lots: Double
