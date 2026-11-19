@@ -91,6 +91,7 @@ enum PhotoLibraryService {
                 var currentLine: [VNRecognizedTextObservation] = []
                 var lineMinY: CGFloat = 0
                 var lineMaxY: CGFloat = 0
+                var groupHasSymbol = false
 
                 func flush() {
                     guard !currentLine.isEmpty else { return }
@@ -99,6 +100,7 @@ enum PhotoLibraryService {
                     let joined = parts.joined(separator: " ").trimmingCharacters(in: .whitespaces)
                     if !joined.isEmpty { lines.append(joined) }
                     currentLine.removeAll()
+                    groupHasSymbol = false
                 }
 
                 // 按纵向重叠分行（2026-11-19 改）：旧做法按 midY 距离逐个
@@ -108,10 +110,26 @@ enum PhotoLibraryService {
                 // 重叠：与当前行的纵向区间重叠达较矮一方四成即同行。
                 for obs in sorted {
                     let box = obs.boundingBox
+                    // 一笔持仓以品种行开头：当前组里已有品种行时，再来
+                    // 一个品种行必须另起一组——纵向区间随成员增长会把
+                    // 下一笔的品种行「够」进来并成一行，解析因此漏笔
+                    // （2026-11-19 四笔只认两笔的实因之一）。
+                    let obsText = obs.topCandidates(1).first?.string ?? ""
+                    let upper = obsText.uppercased()
+                    let isSymbol = upper.contains("GOLD") || upper.contains("XAU")
                     if currentLine.isEmpty {
                         currentLine.append(obs)
                         lineMinY = box.minY
                         lineMaxY = box.maxY
+                        groupHasSymbol = isSymbol
+                        continue
+                    }
+                    if isSymbol && groupHasSymbol {
+                        flush()
+                        currentLine.append(obs)
+                        lineMinY = box.minY
+                        lineMaxY = box.maxY
+                        groupHasSymbol = true
                         continue
                     }
                     let overlap = min(lineMaxY, box.maxY) - max(lineMinY, box.minY)
@@ -120,11 +138,13 @@ enum PhotoLibraryService {
                         currentLine.append(obs)
                         lineMinY = min(lineMinY, box.minY)
                         lineMaxY = max(lineMaxY, box.maxY)
+                        groupHasSymbol = groupHasSymbol || isSymbol
                     } else {
                         flush()
                         currentLine.append(obs)
                         lineMinY = box.minY
                         lineMaxY = box.maxY
+                        groupHasSymbol = isSymbol
                     }
                 }
                 flush()
