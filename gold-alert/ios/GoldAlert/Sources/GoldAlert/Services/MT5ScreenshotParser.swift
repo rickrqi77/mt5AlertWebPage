@@ -47,7 +47,11 @@ enum MT5ScreenshotParser {
             computedTotal += computed
             if let shown = displayedProfits[index] {
                 let tolerance = max(3.0, abs(shown) * 0.15)
-                guard abs(computed - shown) <= tolerance else {
+                // 负号最容易被 OCR 丢（红色负数）：量级对得上、只差
+                // 符号也算对上；合计还有净值−结余与顶部总额两路
+                // 独立参照兜底，不会因此放进坏数据。
+                guard abs(computed - shown) <= tolerance
+                        || abs(computed + shown) <= tolerance else {
                     throw AppError.message(
                         "截图持仓对不上（单笔盈亏：重算 \(fmt2(computed))、显示 \(fmt2(shown))），这次没采用"
                     )
@@ -204,7 +208,6 @@ enum MT5ScreenshotParser {
         // 也不会被误收。
         var positions: [GoldPosition] = []
         var currents: [Double] = []
-        var displayedProfits: [Double?] = []
         for (k, start) in starts.enumerated() {
             let blockEnd = k + 1 < starts.count ? starts[k + 1].index : lines.count
             var prices: [Double] = []
@@ -223,33 +226,41 @@ enum MT5ScreenshotParser {
                 )
             )
             currents.append(prices[1])
-            displayedProfits.append(
-                displayedProfit(inBlock: lines[start.index..<blockEnd], lots: start.lots)
-            )
         }
+        // 显示盈亏按「顺序」配对（2026-11-19 15:47 实证修复）：盈亏是
+        // 独立文字块，OCR 排序时行位会上下漂移、跨过品种行边界，按
+        // 区块归属配对必然错位一格（第 1 笔配到第 2 笔的盈亏）。但
+        // 全部盈亏自上而下的先后顺序不会乱，收集后逐个对位即可；
+        // 数量对不上就整组放弃（全 nil），交给合计参照把关。
+        let profits = profitSequence(
+            in: lines,
+            from: starts.first?.index ?? lines.count,
+            lots: starts.map { $0.lots }
+        )
+        let displayedProfits: [Double?] = profits.count == positions.count
+            ? profits.map { Optional($0) }
+            : [Double?](repeating: nil, count: positions.count)
         return (positions, currents, displayedProfits)
     }
 
-    /// 该笔 MT5 显示的盈亏（如 123.90、-25.20）。在整个持仓区块里找：
-    /// 带小数点的数字里排除手数本身与黄金价位（开仓/现价），最后一个
-    /// 即盈亏；没有则 nil。只查品种行时，若 OCR 把盈亏拼到了价格行上
-    /// 就读不到（2026-11-19 构建 34 实证：逐笔校验被整段跳过、只剩
-    /// 净值一条参照又被读偏，正常截图被误杀）。要求带小数点，是为了
-    /// 不把品种名里的整数（如 GOLD24-7）误当盈亏。
-    private static func displayedProfit(inBlock block: ArraySlice<String>, lots: Double) -> Double? {
+    /// 持仓区内全部「显示盈亏」候选，按出现顺序：带小数点的数字里
+    /// 排除手数与黄金价位（开仓/现价）后剩下的就是各笔盈亏。要求带
+    /// 小数点，是为了不把品种名里的整数（如 GOLD24-7）误当盈亏。
+    private static func profitSequence(in lines: [String], from: Int, lots: [Double]) -> [Double] {
         let pattern = try! NSRegularExpression(pattern: #"-?[0-9]+\.[0-9]+"#)
-        var profit: Double? = nil
-        for line in block {
+        var result: [Double] = []
+        guard from < lines.count else { return result }
+        for line in lines[from...] {
             let ns = line as NSString
             let full = NSRange(location: 0, length: ns.length)
             for match in pattern.matches(in: line, options: [], range: full) {
                 guard let value = Double(ns.substring(with: match.range)) else { continue }
-                if abs(abs(value) - lots) < 0.0001 { continue }
+                if lots.contains(where: { abs(abs(value) - $0) < 0.0001 }) { continue }
                 if isGoldPrice(abs(value)) { continue }
-                profit = value
+                result.append(value)
             }
         }
-        return profit
+        return result
     }
 
     /// 截图顶部蓝色大字是全部持仓的浮盈合计（如「53.10 USD」），
