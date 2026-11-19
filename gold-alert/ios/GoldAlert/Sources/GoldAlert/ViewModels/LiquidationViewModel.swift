@@ -146,7 +146,7 @@ final class LiquidationViewModel: ObservableObject {
 
         let allowed = await PhotoLibraryService.requestAccess()
         guard allowed else {
-            setRecognitionNote("识别失败 · 没有相册权限")
+            setRecognitionNote("识别失败 · \(buildLabel) · 没有相册权限")
             return
         }
 
@@ -163,7 +163,10 @@ final class LiquidationViewModel: ObservableObject {
                 shotLabel = df.string(from: created)
             }
             // 同一张图已成功算过（删除失败时会残留）：不重复计算、也不重复弹删除确认。
+            // 但要在记录里留一句，免得 ren 以为 app 没读新图（记录不更新
+            // 时看起来像识别没反应，2026-11-19 一整天反复因此误判）。
             if asset.localIdentifier == UserDefaults.standard.string(forKey: Self.processedAssetKey) {
+                setRecognitionNote("\(buildLabel) · 图 \(shotLabel) · 这张图已识别过，现在显示的就是它的结果")
                 return
             }
 
@@ -184,7 +187,7 @@ final class LiquidationViewModel: ObservableObject {
                 .joined(separator: "/")
             let goldCount = text.uppercased().components(separatedBy: "GOLD").count - 1
             setRecognitionNote(
-                "识别成功 · 图 \(shotLabel) · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots)) · 入 \(entries) · 文本 GOLD×\(goldCount)"
+                "识别成功 · \(buildLabel) · 图 \(shotLabel) · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots)) · 入 \(entries) · 文本 GOLD×\(goldCount)"
             )
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
 
@@ -194,13 +197,21 @@ final class LiquidationViewModel: ObservableObject {
             // 静默：不提示、不清旧结果；但把失败原因记下来供明细页查看。
             // 附上 OCR 文本里 GOLD 出现次数：图里有几笔、文本读到几处，
             // 一眼能分清是读错图、OCR 漏行还是解析漏提。
-            var message = "识别失败 · 图 \(shotLabel) · \(error.localizedDescription)"
+            var message = "识别失败 · \(buildLabel) · 图 \(shotLabel) · \(error.localizedDescription)"
             if let text = ocrText {
                 let goldCount = text.uppercased().components(separatedBy: "GOLD").count - 1
                 message += " · 文本 GOLD×\(goldCount)"
             }
             setRecognitionNote(message)
         }
+    }
+
+    /// 当前 app 的构建号（TestFlight 构建号即此值），写进识别记录，
+    /// 让 ren 和 Muse 都能一眼确认他测的是哪一版（2026-11-19 多次
+    /// 因新构建还没在 TestFlight 出现、测的仍是旧版而误判）。
+    private var buildLabel: String {
+        let version = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        return "构建 \(version)"
     }
 
     private func setRecognitionNote(_ text: String) {
