@@ -3,7 +3,7 @@ import WatchConnectivity
 
 /// 手表端状态与流程（ren 2026-11-15 确认的口径）：
 /// - 价格固定 Swiss：打开 app 时直连 Swissquote 取中间价，刷新间隔
-///   可在设定页选 0.5 / 1 / 3 / 5 / 10 秒（默认 0.5）；
+///   在设定页用步进器在 0.5 / 1 / 2 / 5 / 10 秒间循环切换（默认 0.5）；
 /// - 选择只有一项：间隔 [1, 2, 3, 4, 5, 10] 默认 5；每边档数固定 7
 ///   （上下各 7、共 15 个，与手机端一致，表上不再提供选择）；
 /// - 亮度不做 app 内调节（ren 2026-11-20 定）：直接用手表系统亮度；
@@ -30,7 +30,22 @@ final class WatchModel: NSObject, ObservableObject {
         didSet { UserDefaults.standard.set(refreshInterval, forKey: Self.refreshIntervalKey) }
     }
     private static let refreshIntervalKey = "refreshInterval"
-    static let refreshChoices: [Double] = [0.5, 1, 2, 3, 5, 10]
+    static let refreshChoices: [Double] = [0.5, 1, 2, 5, 10]
+
+    /// 刷新间隔步进（ren 2026-11-20 改定）：设定页改成 − 值 + 的
+    /// 步进器，在 [0.5, 1, 2, 5, 10] 之间循环切换（加号往大、
+    /// 减号往小，到头绕回另一端）。
+    func cycleRefreshInterval(increase: Bool) {
+        let choices = Self.refreshChoices
+        guard let idx = choices.firstIndex(of: refreshInterval) else {
+            refreshInterval = choices[0]
+            return
+        }
+        let next = increase
+            ? (idx + 1) % choices.count
+            : (idx - 1 + choices.count) % choices.count
+        refreshInterval = choices[next]
+    }
 
     static let stepChoices: [Double] = [1, 2, 3, 4, 5, 10]
 

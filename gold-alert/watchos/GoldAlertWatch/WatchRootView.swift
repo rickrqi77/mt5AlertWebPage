@@ -6,9 +6,9 @@ import SwiftUI
 /// 底部中间只显示金价整数的末两位（如 4019 显示 19），字号 20
 ///（原 15，ren 2026-11-17 要求加大一点）。
 /// 时钟页文字不做 app 内亮度调节，直接用手表系统亮度显示。
-/// 第二页是间隔设定页（ren 2026-11-20 改版）：连接绿点在左上角，
-/// 「间隔」标题靠左、按钮加高，中间一条分割线，下方是刷新间隔
-/// 两排六档（0.5/1/2、3/5/10 秒），整页正好撑满一屏、不用滚动。
+/// 第二页是间隔设定页（ren 2026-11-20 改版）：「间隔」标题靠左、
+/// 按钮加高，中间一条分割线，下方是刷新间隔步进器（标题右侧
+/// 一个 − 值 + 控件，循环切换）。连接圆点已按 ren 要求去掉。
 /// 设定页顶部的完整价格已去掉（ren 2026-11-16 定）。
 /// 亮度调节已删（ren 2026-11-20 定）：app 不再自定义亮度，
 /// 时钟页文字直接按手表系统亮度显示。
@@ -134,47 +134,31 @@ struct WatchRootView: View {
 
     // MARK: - 第二页：间隔设定页
 
-    /// 设定页布局（ren 2026-11-20 改版）：连接圆点在左上角；
-    /// 「间隔」标题靠左；间隔区与刷新间隔区之间一条分割线；
-    /// 刷新间隔两排六档（0.5/1/2、3/5/10）。整页改为可上下
-    /// 滚动（ren 2026-11-20 再改定：固定一屏时顶部绿点与底部
-    /// 设定结果总是被挤出屏外）——只有这一页滚动，时钟页与
-    /// 平仓页不动；转表冠或滑动都能滚，内容从顶部排起。
+    /// 设定页布局（ren 2026-11-20 改版）：「间隔」标题靠左；
+    /// 间隔区与刷新间隔区之间一条分割线；刷新间隔是标题右侧的
+    /// 步进器。连接圆点已去掉、内容变矮，整页固定一屏不滚动
+    /// （滚动版只用了一版即被此版取代）。
     private var settingsPage: some View {
-        ScrollView {
-            VStack(spacing: 4) {
-                header
-                stepPicker
-                Divider()
-                refreshPicker
-                if !model.hasServerCredentials {
-                    Text("未同步直发凭据，暂经手机发送")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                }
-                if let notice = model.notice {
-                    Text(notice)
-                        .font(.caption2)
-                        .foregroundStyle(model.noticeIsError ? .red : .green)
-                        .multilineTextAlignment(.center)
-                }
+        VStack(spacing: 4) {
+            stepPicker
+            Divider()
+            refreshPicker
+            if !model.hasServerCredentials {
+                Text("未同步直发凭据，暂经手机发送")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
-            .padding(.horizontal, 4)
-            .padding(.top, 2)
-            .padding(.bottom, 6)
+            if let notice = model.notice {
+                Text(notice)
+                    .font(.caption2)
+                    .foregroundStyle(model.noticeIsError ? .red : .green)
+                    .multilineTextAlignment(.center)
+            }
         }
-    }
-
-    /// 连接状态点（绿=手机可达、灰=不可达）固定在屏幕左上角；
-    /// ren 定 XAU/USD 与 Swiss 字样都不要。
-    private var header: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(model.phoneReachable ? Color.green : Color.gray)
-                .frame(width: 7, height: 7)
-            Spacer()
-        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
     }
 
     private var stepPicker: some View {
@@ -202,29 +186,42 @@ struct WatchRootView: View {
         }
     }
 
-    /// 分割线下方：实时价格刷新间隔（单位秒，标题不带单位），
-    /// 两排六档：0.5/1/2、3/5/10。
+    /// 分割线下方：实时价格刷新间隔（单位秒，标题不带单位）。
+    /// ren 2026-11-20 改定为步进器：标题右侧一个控件，左 − 右 +，
+    /// 中间是当前值，在 0.5/1/2/5/10 之间循环切换。
     private var refreshPicker: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        HStack(spacing: 6) {
             Text("刷新间隔")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            LazyVGrid(
-                columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 3
-            ) {
-                ForEach(WatchModel.refreshChoices, id: \.self) { choice in
-                    chip(
-                        title: WatchModel.formatInterval(choice),
-                        selected: model.refreshInterval == choice,
-                        fontSize: 14,
-                        height: 28
-                    ) {
-                        model.refreshInterval = choice
-                    }
+            Spacer()
+            HStack(spacing: 4) {
+                stepperButton(symbol: "−") {
+                    model.cycleRefreshInterval(increase: false)
+                }
+                Text(WatchModel.formatInterval(model.refreshInterval))
+                    .font(.system(size: 15, weight: .semibold))
+                    .monospacedDigit()
+                    .frame(minWidth: 30)
+                stepperButton(symbol: "+") {
+                    model.cycleRefreshInterval(increase: true)
                 }
             }
         }
+    }
+
+    /// 步进器的加减按钮（灰底圆角小方块）。
+    private func stepperButton(symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(symbol)
+                .font(.system(size: 16, weight: .bold))
+                .frame(width: 30, height: 28)
+        }
+        .buttonStyle(.plain)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.gray.opacity(0.3))
+        )
     }
 
     // MARK: - 第三页：一键全平
