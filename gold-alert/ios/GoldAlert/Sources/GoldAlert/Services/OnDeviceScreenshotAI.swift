@@ -12,7 +12,7 @@ enum OnDeviceScreenshotAI {
     struct ExtractedPosition {
         @Guide(description: "方向：buy 或 sell（sell 时现价高于开仓价则盈亏为负，buy 时相反，方向须与盈亏符号一致）")
         var side: String
-        @Guide(description: "手数，如 0.1")
+        @Guide(description: "手数，保留原文小数")
         var lots: Double
         @Guide(description: "开仓价（箭头左边的价格）")
         var entry: Double
@@ -40,7 +40,7 @@ enum OnDeviceScreenshotAI {
 
     static func extract(from ocrText: String) async throws -> ExtractedTrade {
         let instructions = """
-        你是 MT5 交易截图 OCR 文本的数据提取器。文本可能有错字、行粘连、千分位空格（如 1 262.23 应读作 1262.23）。只提取 GOLD 或 XAU 品种的持仓；开仓价是箭头左边的价格，现价是右边的价格。数字不要带逗号或空格。
+        你是 MT5 交易截图 OCR 文本的数据提取器。文本可能有错字、行粘连、带空格的千分位（要把空格拼起来读成完整数字）。只提取 GOLD 或 XAU 品种的持仓；开仓价是箭头左边的价格，现价是右边的价格。所有数字只能来自原文，原文没有的数字不要编造；数字不要带逗号或空格。
         """
         let session = LanguageModelSession(instructions: instructions)
         let response = try await session.respond(

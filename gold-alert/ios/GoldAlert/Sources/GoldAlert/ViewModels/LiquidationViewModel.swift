@@ -168,13 +168,12 @@ final class LiquidationViewModel: ObservableObject {
             } else {
                 throw AppError.message("本机 AI 不可用（需 iOS 26 且 Apple Intelligence 就绪）")
             }
+            // 先算成功才存：计算中途失败（如数据不合公式）绝不能把
+            // 上次的好数据覆盖掉（2026-11-19 实证：AI 编造数据先落存、
+            // 计算才报错，结余被冲成 0）。
+            let calculated = try await Self.calculate(mode: mode, data: data)
             // 存下解析出的持仓数据，供切换日元/美元模式时不依赖截图原件即可按新公式重算。
             Self.saveTradeData(data)
-            totalLots = data.totalLots
-            positionSide = data.side
-            averageEntry = data.averageEntry
-
-            let calculated = try await Self.calculate(mode: mode, data: data)
             applyResult(calculated)
             setRecognitionNote(
                 "识别成功 · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots))"
@@ -208,6 +207,23 @@ final class LiquidationViewModel: ObservableObject {
     ) throws -> ScreenshotTradeData {
         guard !raw.isEmpty else {
             throw AppError.message("\(source) 没读到持仓")
+        }
+        // 基本合理性闸门：本机 AI 偶尔会编造整套数字（2026-11-19 实证
+        // 它把指令示例里的数字当成数据交回来），编造值过不了这几关；
+        // 真数据必然结余为正、方向统一、开仓价在金价区间内。
+        guard balance > 0, margin >= 0 else {
+            throw AppError.message("\(source) 结果不合理（结余/预付款异常）")
+        }
+        if let equity, equity <= 0 {
+            throw AppError.message("\(source) 结果不合理（净值异常）")
+        }
+        guard raw.allSatisfy({ $0.side == raw[0].side }) else {
+            throw AppError.message("\(source) 结果方向不统一（buy/sell 混杂）")
+        }
+        guard raw.allSatisfy({
+            $0.entry >= 500 && $0.entry <= 20000 && $0.lots > 0 && $0.lots < 100
+        }) else {
+            throw AppError.message("\(source) 结果不合理（开仓价/手数异常）")
         }
         var positions: [GoldPosition] = []
         var computedList: [Double] = []
