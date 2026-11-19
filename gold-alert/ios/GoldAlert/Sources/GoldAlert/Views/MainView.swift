@@ -36,6 +36,9 @@ struct MainView: View {
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                // 回到前台：价格循环重启并立刻先取一次价刷新显示，
+                // 不等间隔（ren 2026-11-19 要求，手机/手表同口径）。
+                model.onAppear()
                 liquidation.startContinuousRecognition()
                 if liquidation.mode == .jpy {
                     Task { await liquidation.refreshUSDJPYRate() }

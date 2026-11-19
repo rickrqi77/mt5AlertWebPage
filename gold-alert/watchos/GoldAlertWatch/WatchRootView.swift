@@ -30,7 +30,13 @@ struct WatchRootView: View {
                 .tag(2)
         }
         .tabViewStyle(.page)
-        .onAppear { model.startAutoRefresh() }
+        .onAppear {
+            // 打开先直接取一次 Swiss 价刷新显示，不等循环节拍
+            // （ren 2026-11-19 要求，手机/手表同口径）；循环本身
+            // 也是先取后等，这里再直调一次保底激活瞬间不被推迟。
+            Task { await model.refreshPrice() }
+            model.startAutoRefresh()
+        }
         .onDisappear { model.stopAutoRefresh() }
         // 抬腕亮屏（app 回到激活态）时立刻先取一次价，不等循环节拍；
         // 放下手腕变非激活就停循环，省电也避免挂起期间的空转。
@@ -38,6 +44,7 @@ struct WatchRootView: View {
         // 并禁用切换动画：下次亮屏直接停在第一页，没有翻页效果。
         .onChange(of: scenePhase) { phase in
             if phase == .active {
+                Task { await model.refreshPrice() }
                 model.startAutoRefresh()
             } else {
                 model.stopAutoRefresh()

@@ -133,10 +133,12 @@ final class AppViewModel: ObservableObject {
 
     func startLoops() {
         stopLoops()
-        Task {
-            await refreshCloudState()
-            await refreshSwissPrice()
-        }
+        // 打开/回到 app 时先立刻取一次价刷新显示，不等任何间隔
+        // （ren 2026-11-19 要求）：Swiss 报价与云端状态各走一个任务
+        // 并行取、互不等待——旧写法把 Swiss 排在云端状态后面，慢
+        // 网络下要多等几秒才见新价。之后再按各自间隔轮询。
+        Task { await refreshSwissPrice() }
+        Task { await refreshCloudState() }
         // 定时刷新云端状态：EA 推送价格、在线小圆点（连上后变绿）、已触发的行变成“已用”。
         let cloudNanos = UInt64(Self.cloudPollSeconds * 1_000_000_000)
         cloudTask = Task { [weak self] in
