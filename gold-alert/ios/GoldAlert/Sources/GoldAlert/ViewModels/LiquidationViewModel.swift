@@ -186,8 +186,9 @@ final class LiquidationViewModel: ObservableObject {
                 .map { String(format: "%.2f", $0.entryPrice) }
                 .joined(separator: "/")
             let goldCount = text.uppercased().components(separatedBy: "GOLD").count - 1
+            let stats = MT5ScreenshotParser.extractionStats(ocrText: text)
             setRecognitionNote(
-                "识别成功 · \(buildLabel) · 图 \(shotLabel) · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots)) · 入 \(entries) · 文本 GOLD×\(goldCount)"
+                "识别成功 · \(buildLabel) · 图 \(shotLabel) · \(data.positions.count) 笔 · 均价 \(String(format: "%.2f", data.averageEntry)) · 手数 \(String(format: "%.2f", data.totalLots)) · 入 \(entries) · 文本 GOLD×\(goldCount) · 方向×\(stats.sides) · 价位×\(stats.prices)"
             )
             UserDefaults.standard.set(asset.localIdentifier, forKey: Self.processedAssetKey)
 
@@ -200,7 +201,8 @@ final class LiquidationViewModel: ObservableObject {
             var message = "识别失败 · \(buildLabel) · 图 \(shotLabel) · \(error.localizedDescription)"
             if let text = ocrText {
                 let goldCount = text.uppercased().components(separatedBy: "GOLD").count - 1
-                message += " · 文本 GOLD×\(goldCount)"
+                let stats = MT5ScreenshotParser.extractionStats(ocrText: text)
+                message += " · 文本 GOLD×\(goldCount) · 方向×\(stats.sides) · 价位×\(stats.prices)"
             }
             setRecognitionNote(message)
         }

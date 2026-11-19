@@ -6,12 +6,23 @@ import Foundation
 /// Average entry uses each position's **left** price under GOLD
 /// (开仓价 in `3988.21 → 3989.22`), never the right-hand 现价.
 enum MT5ScreenshotParser {
-    static func parse(ocrText: String) throws -> ScreenshotTradeData {
-        let normalized = normalize(ocrText)
-        let lines = normalized
+    private static func splitLines(_ text: String) -> [String] {
+        normalize(text)
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+    }
+
+    /// 供识别记录展示：方向+手数读到几处、黄金价位读到几个，与
+    /// GOLD 出现次数对照，一眼看出是哪条流在漏（2026-11-19 构建 49
+    /// 实证：文本 GOLD×4、成品只有 2 笔，漏点在提取层而非 OCR）。
+    static func extractionStats(ocrText: String) -> (sides: Int, prices: Int) {
+        let s = streams(from: splitLines(ocrText))
+        return (s.sides.count, s.prices.count)
+    }
+
+    static func parse(ocrText: String) throws -> ScreenshotTradeData {
+        let lines = splitLines(ocrText)
 
         guard let balance = findLabeledNumber(
             in: lines,
@@ -118,27 +129,46 @@ enum MT5ScreenshotParser {
     /// 漂到哪一行，都不影响两条流的内部顺序。
     /// 价位流可能多出一个杂质（排头），用「现价各位应当几乎相等」
     /// 在偏移 0/1 间选更齐的一边定开仓价位。
-    private static func extractGoldPositions(from lines: [String]) -> [GoldPosition] {
+    /// 持仓区里的两条流：方向+手数、黄金价位，各按出现顺序。
+    private static func streams(
+        from lines: [String]
+    ) -> (sides: [(side: PositionSide, lots: Double)], prices: [Double]) {
         guard let firstSymbol = lines.firstIndex(where: { goldSymbol(in: $0) != nil }) else {
-            return []
+            return ([], [])
         }
         let region = Array(lines[firstSymbol...])
-
-        // 方向+手数流：整段文本上逐个收集（合并行里有两个也照单全收）。
         let sides = collectSides(in: region.joined(separator: " "))
-        guard !sides.isEmpty else { return [] }
-
-        // 黄金价位流：逐行按出现顺序收集（带 O→0 等数字修复）。
         var prices: [Double] = []
         for line in region {
             prices.append(contentsOf: goldPrices(inLine: line))
         }
+        return (sides, prices)
+    }
 
-        let pairCount = min(sides.count, prices.count / 2)
-        guard pairCount > 0 else { return [] }
+    /// 持仓提取（2026-11-19 按 ren 决定：只提取、不做盈亏对比）。
+    /// 笔数以「价位流」为准：开仓/现价成对出现、现价各笔相同，是
+    /// 画面上最硬的信号（构建 49 实证 GOLD×4、方向流与价位流必有
+    /// 一条在漏，旧法取两条流的较小值、漏一条就整批缩水）。方向+
+    /// 手数按顺序对位；个别笔的方向/手数 token 被 OCR 读坏而缺失
+    /// 时，用其余笔的多数派（方向、手数各取众数）补位——同一账户
+    /// 的持仓方向、手数通常整齐划一，补位不会改均价，手数合计也对。
+    /// 价位流排头多一个杂质时，用「现价各位几乎相等」在偏移 0/1
+    /// 间选更齐的一边定开仓价位。
+    private static func extractGoldPositions(from lines: [String]) -> [GoldPosition] {
+        let (sides, prices) = streams(from: lines)
+        var pairCount = prices.count / 2
+        // 笔数上限以 GOLD 出现次数为准（ren 的规则：每个 GOLD 是一
+        // 笔交易），防价位流里的杂质凑出多余的对。
+        if let firstSymbol = lines.firstIndex(where: { goldSymbol(in: $0) != nil }) {
+            let symbolCount = lines[firstSymbol...].reduce(0) {
+                $0 + goldSymbolCount(in: $1)
+            }
+            if symbolCount > 0 {
+                pairCount = min(pairCount, symbolCount)
+            }
+        }
+        guard pairCount > 0, !sides.isEmpty else { return [] }
 
-        // 偏移选择：现价在每对的第二位，各笔现价应几乎相同；
-        // 偏移 0 与 1（价位流排头多一个杂质时）比谁的现价更整齐。
         var offset = 0
         if prices.count - 2 * pairCount >= 1 {
             let spread0 = currentSpread(prices: prices, offset: 0, count: pairCount)
@@ -146,11 +176,21 @@ enum MT5ScreenshotParser {
             if spread1 < spread0 { offset = 1 }
         }
 
+        let majoritySide = sides.map { $0.side }
+            .reduce(into: [PositionSide: Int]()) { $0[$1, default: 0] += 1 }
+            .max(by: { $0.value < $1.value })?.key ?? sides[0].side
+        let majorityLots = sides.map { $0.lots }
+            .reduce(into: [Double: Int]()) { $0[$1, default: 0] += 1 }
+            .max(by: { $0.value < $1.value })?.key ?? sides[0].lots
+
         return (0..<pairCount).map { i in
-            GoldPosition(
+            let s = i < sides.count
+                ? sides[i]
+                : (side: majoritySide, lots: majorityLots)
+            return GoldPosition(
                 symbol: "GOLD",
-                side: sides[i].side,
-                lots: sides[i].lots,
+                side: s.side,
+                lots: s.lots,
                 entryPrice: prices[offset + 2 * i]
             )
         }
@@ -167,19 +207,33 @@ enum MT5ScreenshotParser {
     /// 0.01 步进（小数至多两位），OCR 把手数与后面数字读串时出现的
     /// 四位小数不采信、跳过该候选继续找。
     private static func collectSides(in text: String) -> [(side: PositionSide, lots: Double)] {
-        let pattern = #"(?i)\b(buy|sell)\b\s*([0-9]+(?:\.[0-9]+)?)"#
+        let pattern = #"(?i)\b(buy|sell)\b\s*([0-9OIl]+(?:\.[0-9OIl]+)?)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
         let ns = text as NSString
         let full = NSRange(location: 0, length: ns.length)
         var result: [(side: PositionSide, lots: Double)] = []
         for match in regex.matches(in: text, options: [], range: full) where match.numberOfRanges >= 3 {
+            // 手数的 0 常被读成 O、1 读成 l/I（如 O.1），先修复再验。
             let token = ns.substring(with: match.range(at: 2))
+                .replacingOccurrences(of: "O", with: "0")
+                .replacingOccurrences(of: "I", with: "1")
+                .replacingOccurrences(of: "l", with: "1")
             guard isValidLotsToken(token),
                   let lots = Double(token), lots > 0, lots < 100 else { continue }
             let sideRaw = ns.substring(with: match.range(at: 1)).lowercased()
             result.append((side: sideRaw == "buy" ? .buy : .sell, lots: lots))
         }
         return result
+    }
+
+    /// 一行里 GOLD/XAU 品种名出现的次数（合并行里有两个也算两个）。
+    private static func goldSymbolCount(in line: String) -> Int {
+        let pattern = #"(?i)\b(GOLD[A-Z0-9#._\-]*|XAU[A-Z0-9#._\-]*)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return 0 }
+        let ns = line as NSString
+        return regex.numberOfMatches(
+            in: line, options: [], range: NSRange(location: 0, length: ns.length)
+        )
     }
 
     private static func goldSymbol(in line: String) -> String? {
