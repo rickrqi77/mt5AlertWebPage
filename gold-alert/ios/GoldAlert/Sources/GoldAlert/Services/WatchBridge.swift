@@ -17,6 +17,11 @@ final class WatchBridge: NSObject, WCSessionDelegate {
     /// 返回直接回给手表的字典。
     var onCloseAll: (() async -> [String: Any])?
 
+    /// 当前凭据提供者（AppViewModel 注册）：会话刚激活完成时若
+    /// 已有凭据，顺手同步一次给手表，堵住「解锁时会话还没激活、
+    /// 同步被跳过」的时序缝。
+    var credentialsProvider: (() -> (baseURL: String, token: String)?)?
+
     private override init() {
         super.init()
     }
@@ -28,13 +33,34 @@ final class WatchBridge: NSObject, WCSessionDelegate {
         session.activate()
     }
 
+    /// 把服务器地址+token 同步给手表（ren 2026-11-20 改定：手表
+    /// 设定直发服务器，不再经手机中转）。走 applicationContext：
+    /// 系统持久保存、手表 app 下次打开也必送达，解锁后与每次打开
+    /// app 时各推一次，保证手表上存的始终是当前凭据。
+    func pushCredentialsToWatch(baseURL: String, token: String) {
+        guard WCSession.isSupported(), !baseURL.isEmpty, !token.isEmpty else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        try? session.updateApplicationContext([
+            "apiBaseURL": baseURL,
+            "apiToken": token,
+        ])
+    }
+
     // MARK: - WCSessionDelegate
 
     nonisolated func session(
         _ session: WCSession,
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
-    ) {}
+    ) {
+        guard activationState == .activated else { return }
+        Task { @MainActor in
+            if let c = WatchBridge.shared.credentialsProvider?() {
+                WatchBridge.shared.pushCredentialsToWatch(baseURL: c.baseURL, token: c.token)
+            }
+        }
+    }
 
     nonisolated func sessionDidBecomeInactive(_ session: WCSession) {}
 

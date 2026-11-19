@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 enum WatchPriceError: LocalizedError, Sendable {
     case message(String)
@@ -41,6 +42,32 @@ actor WatchAPI {
         return price
     }
 
+    /// 把网格直接 POST 到服务器 /api/alerts（ren 2026-11-20 改定：
+    /// 手表设定直发后台，不再经手机中转；请求格式与手机端
+    /// CloudflareClient.saveAlerts 完全一致，服务器据此更新配置、
+    /// EA 下个同步周期即采用）。凭据由手机经 WatchConnectivity 的
+    /// applicationContext 同步过来、存手表 Keychain（见 WatchSecrets）。
+    func postAlerts(baseURL: String, token: String, step: Double, rows: [(price: Double, enabled: Bool)]) async throws {
+        let base = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(base)/api/alerts") else {
+            throw WatchPriceError.message("服务器地址无效")
+        }
+        let payload: [[String: Any]] = rows.map {
+            ["price": $0.price, "enabled": $0.enabled, "triggered": 0]
+        }
+        let body: [String: Any] = ["alerts": payload, "step": step]
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 15
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw WatchPriceError.message("服务器没有接受设定")
+        }
+    }
+
     private static func pickMidPrice(from rows: [SwissRow]) -> Double? {
         var fallback: Double?
         for row in rows {
@@ -53,6 +80,39 @@ actor WatchAPI {
             }
         }
         return fallback
+    }
+}
+
+/// 手表端凭据存储（服务器地址 + API token）：手机解锁后经
+/// applicationContext 同步过来，存 Keychain、只留手表本地，
+/// 供设定直发服务器用（ren 2026-11-20 改定）。
+enum WatchSecrets {
+    private static let service = "com.rickrqi77.goldalert.watch"
+
+    static func save(_ value: String, account: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+        var attrs = query
+        attrs[kSecValueData as String] = Data(value.utf8)
+        SecItemAdd(attrs as CFDictionary, nil)
+    }
+
+    static func load(account: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }
 

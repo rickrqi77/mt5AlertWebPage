@@ -6,15 +6,16 @@ import SwiftUI
 /// 底部中间只显示金价整数的末两位（如 4019 显示 19），字号 20
 ///（原 15，ren 2026-11-17 要求加大一点）。
 /// 时钟页文字不做 app 内亮度调节，直接用手表系统亮度显示。
-/// 第二页是间隔设定页：顶部中间连接绿点（XAU/USD、Swiss 字样已去），
-/// 间隔选择、最下方是价格刷新间隔选择（0.5/1/3/5/10 秒）。设定页顶部
-/// 的完整价格已去掉（ren 2026-11-16 定），整页不用滚动、一页放下。
+/// 第二页是间隔设定页（ren 2026-11-20 改版）：连接绿点在左上角，
+/// 「间隔」标题靠左、按钮加高，中间一条分割线，下方是刷新间隔
+/// 两排六档（0.5/1/2、3/5/10 秒），整页正好撑满一屏、不用滚动。
+/// 设定页顶部的完整价格已去掉（ren 2026-11-16 定）。
 /// 亮度调节已删（ren 2026-11-20 定）：app 不再自定义亮度，
 /// 时钟页文字直接按手表系统亮度显示。
-/// 没有推送按钮：点间隔即直接设定并推送；亮度停改（停下来）后
-/// 自动跳回第一页看效果。无预览框、无分割线，字号与控件高度都压过。
-/// 价格固定 Swiss（打开时 0.5 秒刷新、抬腕激活立刻先刷一次）；
-/// 推送只是把选择发给手机执行，手机不在附近时会明确报失败。
+/// 没有推送按钮：点间隔即直接设定——有服务器凭据时直发后台
+/// （手机没打开也能生效），无凭据时回退经手机发送。
+/// 价格固定 Swiss（打开/抬腕激活立刻先刷一次，之后按刷新间隔）。
+/// 第三页平仓页右下角空白区双击回第一页（ren 2026-11-20 要求）。
 struct WatchRootView: View {
     @EnvironmentObject private var model: WatchModel
     @Environment(\.scenePhase) private var scenePhase
@@ -133,13 +134,18 @@ struct WatchRootView: View {
 
     // MARK: - 第二页：间隔设定页
 
+    /// 设定页布局（ren 2026-11-20 改版）：连接圆点在左上角、内容
+    /// 整体上移；「间隔」标题靠左；按钮加高；间隔区与刷新间隔区
+    /// 之间一条分割线；刷新间隔改两排六档（0.5/1/2、3/5/10）；
+    /// 按钮高度算好让整页正好撑满一屏、不滚动。
     private var settingsPage: some View {
-        VStack(spacing: 3) {
+        VStack(spacing: 5) {
             header
             stepPicker
+            Divider()
             refreshPicker
-            if !model.phoneReachable {
-                Text("推送需要手机在附近并保持连接")
+            if !model.hasServerCredentials {
+                Text("未同步直发凭据，暂经手机发送")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -151,14 +157,14 @@ struct WatchRootView: View {
                     .multilineTextAlignment(.center)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, 4)
     }
 
-    /// 顶部只留连接状态点（绿=手机可达、灰=不可达），横向居中；
+    /// 连接状态点（绿=手机可达、灰=不可达）固定在屏幕左上角；
     /// ren 定 XAU/USD 与 Swiss 字样都不要。
     private var header: some View {
         HStack(spacing: 4) {
-            Spacer()
             Circle()
                 .fill(model.phoneReachable ? Color.green : Color.gray)
                 .frame(width: 7, height: 7)
@@ -167,42 +173,47 @@ struct WatchRootView: View {
     }
 
     private var stepPicker: some View {
-        VStack(spacing: 3) {
+        VStack(alignment: .leading, spacing: 3) {
             Text("间隔")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
             LazyVGrid(
                 columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
-                spacing: 3
+                spacing: 4
             ) {
                 ForEach(WatchModel.stepChoices, id: \.self) { choice in
                     chip(
                         title: WatchModel.formatStep(choice),
-                        selected: model.selectedStep == choice
+                        selected: model.selectedStep == choice,
+                        height: 38
                     ) {
-                        // 点间隔 = 直接设定并推送（ren 定不要按钮）。
+                        // 点间隔 = 直接设定（ren 定不要按钮）：有凭据
+                        // 直发服务器、无凭据回退经手机（见 WatchModel）。
                         model.selectedStep = choice
-                        model.pushSelection()
+                        model.applyStepSelection()
                     }
                 }
             }
         }
     }
 
-    /// 设定页最下方：实时价格刷新间隔（单位秒，标题不带单位），五个一排。
+    /// 分割线下方：实时价格刷新间隔（单位秒，标题不带单位），
+    /// 两排六档：0.5/1/2、3/5/10。
     private var refreshPicker: some View {
-        VStack(spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             Text("刷新间隔")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-            HStack(spacing: 4) {
+            LazyVGrid(
+                columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())],
+                spacing: 4
+            ) {
                 ForEach(WatchModel.refreshChoices, id: \.self) { choice in
                     chip(
                         title: WatchModel.formatInterval(choice),
                         selected: model.refreshInterval == choice,
-                        fontSize: 13,
-                        height: 26
+                        fontSize: 14,
+                        height: 34
                     ) {
                         model.refreshInterval = choice
                     }
@@ -246,7 +257,19 @@ struct WatchRootView: View {
                     .multilineTextAlignment(.center)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, 6)
+        // 右下角空白区双击回第一页（ren 2026-11-20 要求）：与第一页
+        // 的双击进平仓页对称；离开时顺手把确认/结果态收回待机。
+        .overlay(alignment: .bottomTrailing) {
+            Color.clear
+                .frame(width: 90, height: 70)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    model.closeAllPageReset()
+                    selectedPage = 0
+                }
+        }
     }
 
     private func closeAllButton(

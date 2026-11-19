@@ -79,6 +79,10 @@ final class AppViewModel: ObservableObject {
             await self?.handleWatchCloseAll()
                 ?? ["ok": false, "message": "手机端还没准备好"]
         }
+        WatchBridge.shared.credentialsProvider = { [weak self] in
+            guard let self, self.isUnlocked, !self.token.isEmpty else { return nil }
+            return (self.baseURL, self.token)
+        }
     }
 
     func onAppear() {
@@ -139,6 +143,10 @@ final class AppViewModel: ObservableObject {
         // 网络下要多等几秒才见新价。之后再按各自间隔轮询。
         Task { await refreshSwissPrice() }
         Task { await refreshCloudState() }
+        // 每次打开都把当前凭据再同步一次给手表（手表设定直发
+        // 服务器用）；refreshCloudState 同时会把服务器上的最新
+        // 设定（网格+间隔，含手表刚改的）刷回本机显示。
+        WatchBridge.shared.pushCredentialsToWatch(baseURL: baseURL, token: token)
         // 定时刷新云端状态：EA 推送价格、在线小圆点（连上后变绿）、已触发的行变成“已用”。
         let cloudNanos = UInt64(Self.cloudPollSeconds * 1_000_000_000)
         cloudTask = Task { [weak self] in

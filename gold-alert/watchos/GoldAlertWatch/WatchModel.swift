@@ -7,13 +7,13 @@ import WatchConnectivity
 /// - 选择只有一项：间隔 [1, 2, 3, 4, 5, 10] 默认 5；每边档数固定 7
 ///   （上下各 7、共 15 个，与手机端一致，表上不再提供选择）；
 /// - 亮度不做 app 内调节（ren 2026-11-20 定）：直接用手表系统亮度；
-/// - 执行留在手机上：在表上点间隔即把 {step, perSide} 经
-///   WatchConnectivity 的 sendMessage 发给手机（无确认按钮），手机用它现有的建网格逻辑
-///   生成网格并 POST /api/alerts，再把结果回传到表上显示。token 不进手表。
-///   手机当下不可达时改走 transferUserInfo 排队（手机 app 下次被
-///   唤醒/打开时执行），表上如实显示排队状态、不假装已生效；
-///   sendMessage 发出后 12 秒没回话会有看门狗解锁并报错，点按不会
-///   再无声无息地卡死（ren 2026-11-20 报「点了没反应」后加）。
+/// - 设定执行（ren 2026-11-20 改定）：表上点间隔直接把网格 POST 到
+///   服务器 /api/alerts（用表上现取的 Swiss 价建网格，规则与手机
+///   buildGrid 一致），不经手机中转——手机 app 没打开也能生效，
+///   EA 下个同步周期即采用。凭据（服务器地址+token）由手机解锁后
+///   经 applicationContext 同步到手表、存 Keychain；还没同步到时
+///   回退旧通道：sendMessage 发给手机执行（手机不可达时
+///   transferUserInfo 排队），sendMessage 有 12 秒回话看门狗。
 @MainActor
 final class WatchModel: NSObject, ObservableObject {
     @Published var swissPrice: Double = 0
@@ -30,9 +30,18 @@ final class WatchModel: NSObject, ObservableObject {
         didSet { UserDefaults.standard.set(refreshInterval, forKey: Self.refreshIntervalKey) }
     }
     private static let refreshIntervalKey = "refreshInterval"
-    static let refreshChoices: [Double] = [0.5, 1, 3, 5, 10]
+    static let refreshChoices: [Double] = [0.5, 1, 2, 3, 5, 10]
 
     static let stepChoices: [Double] = [1, 2, 3, 4, 5, 10]
+
+    /// 服务器凭据（手机同步过来、存 Keychain）：设定直发服务器用。
+    @Published private(set) var apiBaseURL: String?
+    @Published private(set) var apiToken: String?
+    var hasServerCredentials: Bool {
+        !(apiBaseURL?.isEmpty ?? true) && !(apiToken?.isEmpty ?? true)
+    }
+    private static let baseURLAccount = "apiBaseURL"
+    private static let tokenAccount = "apiToken"
     /// 每边档数固定 7（ren 定：表上不提供选择，与手机一致）。
     static let perSide = 7
 
@@ -41,6 +50,8 @@ final class WatchModel: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        apiBaseURL = WatchSecrets.load(account: Self.baseURLAccount)
+        apiToken = WatchSecrets.load(account: Self.tokenAccount)
         if let saved = UserDefaults.standard.object(forKey: Self.refreshIntervalKey) as? Double,
            Self.refreshChoices.contains(saved) {
             refreshInterval = saved
@@ -75,7 +86,48 @@ final class WatchModel: NSObject, ObservableObject {
         refreshLoopTask = nil
     }
 
-    // MARK: - 把设定发给手机执行
+    // MARK: - 设定执行（直发服务器优先，无凭据回退经手机）
+
+    /// 点间隔的统一入口：有服务器凭据就直发服务器；还没有（手机
+    /// 没同步过来）就回退经手机执行的旧通道，保证任何状态下点了都有用。
+    func applyStepSelection() {
+        if hasServerCredentials {
+            Task { await sendGridDirectly() }
+        } else {
+            pushSelection()
+        }
+    }
+
+    /// 用手表当前 Swiss 价建网格（规则与手机 buildGrid 一致：起点=
+    /// 价格整数部分、起点关闭、上下各 7 档），直接 POST 到服务器。
+    func sendGridDirectly() async {
+        guard !pushing else { return }
+        guard let base = apiBaseURL, let tok = apiToken else {
+            pushSelection()
+            return
+        }
+        pushing = true
+        defer { pushing = false }
+        if swissPrice <= 0 { await refreshPrice() }
+        let price = swissPrice
+        guard price > 0 else {
+            showNotice("还没有取到价格，稍后再试", isError: true)
+            return
+        }
+        let start = Double(Int(price))
+        var rows: [(price: Double, enabled: Bool)] = [(start, false)]
+        for i in 1...Self.perSide {
+            rows.append((start - selectedStep * Double(i), true))
+            rows.append((start + selectedStep * Double(i), true))
+        }
+        rows.sort { $0.price < $1.price }
+        do {
+            try await WatchAPI.shared.postAlerts(baseURL: base, token: tok, step: selectedStep, rows: rows)
+            showNotice("已设定", isError: false)
+        } catch {
+            showNotice("发送失败：\(error.localizedDescription)", isError: true)
+        }
+    }
 
     /// sendMessage 回话看门狗：12 秒内既没回复也没报错就解锁并
     /// 报错。旧版没有这层：手机端不回话时 pushing 永远为真，之后
@@ -269,6 +321,23 @@ extension WatchModel: WCSessionDelegate {
         let reachable = session.isReachable
         Task { @MainActor in
             self.phoneReachable = reachable
+        }
+    }
+
+    /// 手机同步过来的服务器凭据（解锁后与每次打开 app 时推送）：
+    /// 存进 Keychain，设定从此可直发服务器、不依赖手机 app 开着。
+    nonisolated func session(
+        _ session: WCSession,
+        didReceiveApplicationContext applicationContext: [String: Any]
+    ) {
+        let base = applicationContext["apiBaseURL"] as? String
+        let tok = applicationContext["apiToken"] as? String
+        guard let base, !base.isEmpty, let tok, !tok.isEmpty else { return }
+        Task { @MainActor in
+            WatchSecrets.save(base, account: Self.baseURLAccount)
+            WatchSecrets.save(tok, account: Self.tokenAccount)
+            self.apiBaseURL = base
+            self.apiToken = tok
         }
     }
 }
