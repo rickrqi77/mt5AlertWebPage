@@ -26,9 +26,34 @@ enum MT5ScreenshotParser {
         }
 
         // Only real OCR lines — do not append the joined blob (that duplicated positions).
-        let positions = extractGoldPositions(from: lines)
+        let (positions, currents) = extractGoldPositions(from: lines)
         guard !positions.isEmpty else {
             throw AppError.message("截图里没有 GOLD 持仓")
+        }
+
+        // 盈亏交叉校验（2026-11-19 ren 实报：三笔 sell 0.1 只读出两笔，均价与
+        // 手数全错但没报错）：OCR 漏掉/串行一笔时，顺序配对会静默错位。
+        // 截图自带真值——净值−结余就是全部持仓的浮盈合计；按解析出的持仓
+        // （开仓价、现价、手数、方向）重算的浮盈与它对不上（容差取
+        // max(5 美元, 5%)，吸收隔夜利息与 OCR 小数误差）就整次作废，
+        // 调用方会保留上次的好数据。净值没读到时跳过校验，不误杀。
+        if let equity = findLabeledNumber(
+            in: lines,
+            labels: ["净值"],
+            rejectIfLineContains: ["结余", "预付款", "可用"]
+        ) {
+            let expected = equity - balance
+            var computed = 0.0
+            for (position, current) in zip(positions, currents) {
+                let diff = position.side == .buy
+                    ? current - position.entryPrice
+                    : position.entryPrice - current
+                computed += diff * position.lots * 100
+            }
+            let tolerance = max(5.0, abs(expected) * 0.05)
+            guard abs(computed - expected) <= tolerance else {
+                throw AppError.message("截图持仓对不上，这次没采用")
+            }
         }
 
         // 最后一道手数合理性检查：MT5 手数按 0.01 步进，合计手数必须是 0.01 的
@@ -107,7 +132,11 @@ enum MT5ScreenshotParser {
 
     // MARK: - Positions
 
-    private static func extractGoldPositions(from lines: [String]) -> [GoldPosition] {
+    /// 返回持仓与各自配对到的现价（现价只供 parse 里的盈亏交叉校验用，
+    /// 不进 GoldPosition 模型）。
+    private static func extractGoldPositions(
+        from lines: [String]
+    ) -> (positions: [GoldPosition], currents: [Double]) {
         // 第一步：收集全部持仓起点（含 GOLD/XAU 品种的行）。方向+手数就在该行
         // 上（MT5 排版如「GOLD# sell 0.05」），或紧随的一两行内；查找止于下一个
         // 品种行，避免把下一笔的方向手数串过来。
@@ -125,12 +154,12 @@ enum MT5ScreenshotParser {
             }
         }
 
-        // 第二步：收集全部开仓价（「开仓价 → 现价」的左侧价），保持行序；
+        // 第二步：收集全部价对（「开仓价 → 现价」的左价与右价），保持行序；
         // 同一行有多个箭头价对时逐个收。
-        var priceEntries: [(index: Int, price: Double)] = []
+        var priceEntries: [(index: Int, entry: Double, current: Double)] = []
         for (index, line) in lines.enumerated() {
-            for price in entryPrices(inLine: line) {
-                priceEntries.append((index: index, price: price))
+            for pair in entryPricePairs(inLine: line) {
+                priceEntries.append((index: index, entry: pair.entry, current: pair.current))
             }
         }
 
@@ -143,6 +172,7 @@ enum MT5ScreenshotParser {
         // dedupe 误杀的教训同样适用）。
         var used = Set<Int>()
         var positions: [GoldPosition] = []
+        var currents: [Double] = []
         for start in starts {
             guard let found = priceEntries.enumerated().first(where: {
                 $0.element.index >= start.index && !used.contains($0.offset)
@@ -153,11 +183,12 @@ enum MT5ScreenshotParser {
                     symbol: start.symbol,
                     side: start.side,
                     lots: start.lots,
-                    entryPrice: found.element.price
+                    entryPrice: found.element.entry
                 )
             )
+            currents.append(found.element.current)
         }
-        return positions
+        return (positions, currents)
     }
 
     private static func goldSymbol(in line: String) -> String? {
@@ -203,25 +234,29 @@ enum MT5ScreenshotParser {
         }
     }
 
-    /// 一行里全部 `开仓价 → 现价` 的左侧开仓价（通常一个）。
+    /// 一行里全部 `开仓价 → 现价` 价对（通常一个）：左开仓价、右现价。
     /// Do not treat the hyphen inside `GOLD24-7` as a price arrow.
-    private static func entryPrices(inLine line: String) -> [Double] {
+    private static func entryPricePairs(
+        inLine line: String
+    ) -> [(entry: Double, current: Double)] {
         // Both sides must look like gold prices (3+ digits). No bare "-" (breaks GOLD24-7).
         let arrow = try! NSRegularExpression(
             pattern: #"([0-9]{3,}(?:\.[0-9]+)?)\s*(?:→|->|➜|⇒|—|–|>|›|»|\s-\s)\s*([0-9]{3,}(?:\.[0-9]+)?)"#
         )
         let ns = line as NSString
         let full = NSRange(location: 0, length: ns.length)
-        var result: [Double] = []
+        var result: [(entry: Double, current: Double)] = []
         for pm in arrow.matches(in: line, options: [], range: full) where pm.numberOfRanges >= 3 {
             let left = Double(ns.substring(with: pm.range(at: 1))) ?? 0
             let right = Double(ns.substring(with: pm.range(at: 2))) ?? 0
-            if isGoldPrice(left), isGoldPrice(right) { result.append(left) }
+            if isGoldPrice(left), isGoldPrice(right) {
+                result.append((entry: left, current: right))
+            }
         }
         if !result.isEmpty { return result }
-        // No arrow glyph: two gold-range prices on one line → left is entry.
+        // No arrow glyph: two gold-range prices on one line → left is entry, right is current.
         let prices = allNumbers(in: line).filter(isGoldPrice)
-        if prices.count >= 2 { return [prices[0]] }
+        if prices.count >= 2 { return [(entry: prices[0], current: prices[1])] }
         return []
     }
 
