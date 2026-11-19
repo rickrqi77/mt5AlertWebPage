@@ -24,11 +24,45 @@ enum MT5ScreenshotParser {
         return (s.sides.count, s.prices.count, pricePairs(from: lines))
     }
 
-    /// 价位流定对：笔数 = 价位数的一半、再以 GOLD 出现次数封顶
-    /// （ren 的规则：每个 GOLD 一笔）；排头多一个杂质时用现价
-    /// 整齐度在偏移 0/1 间选。每对 = (左价开仓, 右价现价)，平均价
-    /// 只用左价（ren 2026-11-19 明确：右边的实时价不需要）。
+    /// 价位对主路径（ren 2026-11-20 再次明确）：只认 GOLD 下方带
+    /// 箭头那一行的数字，取箭头左边为开仓价、右边为现价。盈亏
+    /// 数字（601.30、746.80 等）排在 GOLD 行右侧，数值又落在
+    /// 黄金价位区间（500–20000）里，旧「全持仓区收集价位流」的
+    /// 做法会把它们当成价格混进流里、整体错位（构建 62 实证：
+    /// 601.30 被当成第一笔开仓价、均价算出 3084.18）。箭头行里
+    /// 即使粘上盈亏，它也在最右边，取前两个数仍是对的。
     private static func pricePairs(
+        from lines: [String]
+    ) -> [(entry: Double, current: Double)] {
+        var pairs: [(entry: Double, current: Double)] = []
+        for line in lines where line.contains("→") {
+            let nums = goldPrices(inLine: line)
+            if nums.count >= 2 {
+                pairs.append((entry: nums[0], current: nums[1]))
+            }
+        }
+        if !pairs.isEmpty {
+            // 笔数以 GOLD 出现次数封顶（ren 的规则：每个 GOLD 一笔），
+            // 防箭头行被条带扫描重复组装出多余对。
+            if let firstSymbol = lines.firstIndex(where: { goldSymbol(in: $0) != nil }) {
+                let symbolCount = lines[firstSymbol...].reduce(0) {
+                    $0 + goldSymbolCount(in: $1)
+                }
+                if symbolCount > 0, pairs.count > symbolCount {
+                    pairs = Array(pairs.prefix(symbolCount))
+                }
+            }
+            return pairs
+        }
+        // 兜底：整图一个箭头都没读到时才退回旧价位流对位，好过
+        // 直接报废。
+        return legacyPricePairs(from: lines)
+    }
+
+    /// 旧价位流定对（仅作无箭头时的兜底）：笔数 = 价位数的一半、
+    /// 再以 GOLD 出现次数封顶；排头多一个杂质时用现价整齐度在
+    /// 偏移 0/1 间选。每对 = (左价开仓, 右价现价)。
+    private static func legacyPricePairs(
         from lines: [String]
     ) -> [(entry: Double, current: Double)] {
         let (_, prices) = streams(from: lines)
