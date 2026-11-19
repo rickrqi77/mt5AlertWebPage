@@ -141,7 +141,10 @@ struct WatchRootView: View {
     private var settingsPage: some View {
         VStack(spacing: 4) {
             stepPicker
+            // 间隔区与刷新间隔区之间多留一点空，分割线正居空档
+            // 中间（上下各 9pt，ren 2026-11-20 装机看图后定）。
             Divider()
+                .padding(.vertical, 9)
             refreshPicker
             if !model.hasServerCredentials {
                 Text("未同步直发凭据，暂经手机发送")
@@ -158,7 +161,6 @@ struct WatchRootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.horizontal, 4)
-        .padding(.top, 2)
     }
 
     private var stepPicker: some View {
@@ -191,9 +193,14 @@ struct WatchRootView: View {
     /// 中间是当前值，在 0.5/1/2/5/10 之间循环切换。
     private var refreshPicker: some View {
         HStack(spacing: 6) {
+            // 标题必须一行显示（初版被步进器挤成两行，ren 看图实报）：
+            // 固定固有宽度、不许换行、布局优先级最高。
             Text("刷新间隔")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
             Spacer()
             HStack(spacing: 4) {
                 stepperButton(symbol: "−") {
