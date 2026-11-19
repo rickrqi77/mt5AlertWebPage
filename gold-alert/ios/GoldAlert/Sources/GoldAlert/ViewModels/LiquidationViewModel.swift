@@ -210,24 +210,26 @@ final class LiquidationViewModel: ObservableObject {
             throw AppError.message("\(source) 没读到持仓")
         }
         var positions: [GoldPosition] = []
-        var computedTotal = 0.0
-        for item in raw {
-            var side = item.side
-            let diff = side == .buy
+        var computedList: [Double] = []
+        // 与显示盈亏只差一个符号的笔先记下、不当场判死：可能是 AI 把
+        // 方向标反，也可能是它把某笔盈亏的正负号读反（2026-11-19
+        // 实证：3750.10 那笔实际 +113.40 蓝字盈利，AI 报成 -113.40，
+        // 重算反而是对的）。两种猜测由合计（净值−结余）仲裁。
+        var flipCandidates: [Int] = []
+        for (index, item) in raw.enumerated() {
+            let diff = item.side == .buy
                 ? item.current - item.entry
                 : item.entry - item.current
-            var computed = diff * item.lots * 100
+            let computed = diff * item.lots * 100
+            computedList.append(computed)
+            positions.append(
+                GoldPosition(symbol: "GOLD", side: item.side, lots: item.lots, entryPrice: item.entry)
+            )
             if let shown = item.profit {
                 let tolerance = max(3.0, abs(shown) * 0.15)
                 if abs(computed - shown) > tolerance {
-                    // 只差一个符号：AI 把方向标反了（它给的盈亏符号与
-                    // 价格关系一致地指向相反方向）。以盈亏为准纠正
-                    // 方向再采用——开仓价不动，平均价不受影响；纠正
-                    // 后还要过下面的合计校验兜底（2026-11-19 实证：
-                    // 重算 113.40、显示 -113.40 被整单误杀）。
                     if abs(computed + shown) <= tolerance {
-                        side = side == .buy ? .sell : .buy
-                        computed = -computed
+                        flipCandidates.append(index)
                     } else {
                         throw AppError.message(
                             "\(source) 结果自相矛盾（单笔盈亏：重算 \(String(format: "%.2f", computed))、显示 \(String(format: "%.2f", shown))）"
@@ -235,14 +237,32 @@ final class LiquidationViewModel: ObservableObject {
                     }
                 }
             }
-            positions.append(
-                GoldPosition(symbol: "GOLD", side: side, lots: item.lots, entryPrice: item.entry)
-            )
-            computedTotal += computed
         }
+        var computedTotal = computedList.reduce(0, +)
         if let equity {
             let expected = equity - balance
-            guard abs(computedTotal - expected) <= max(20.0, abs(expected) * 0.20) else {
+            let totalTolerance = max(20.0, abs(expected) * 0.20)
+            if abs(computedTotal - expected) > totalTolerance, !flipCandidates.isEmpty {
+                // 原样对不上合计 → 试把存疑几笔的方向翻过来再对：
+                // 翻后对上，说明 AI 标反的是方向，采用翻向版本。
+                var flippedTotal = computedTotal
+                for index in flipCandidates {
+                    flippedTotal -= 2 * computedList[index]
+                }
+                if abs(flippedTotal - expected) <= totalTolerance {
+                    for index in flipCandidates {
+                        let old = positions[index]
+                        positions[index] = GoldPosition(
+                            symbol: old.symbol,
+                            side: old.side == .buy ? .sell : .buy,
+                            lots: old.lots,
+                            entryPrice: old.entryPrice
+                        )
+                    }
+                    computedTotal = flippedTotal
+                }
+            }
+            guard abs(computedTotal - expected) <= totalTolerance else {
                 throw AppError.message(
                     "\(source) 结果自相矛盾（盈亏合计：重算 \(String(format: "%.2f", computedTotal))、参照 \(String(format: "%.2f", expected))）"
                 )
