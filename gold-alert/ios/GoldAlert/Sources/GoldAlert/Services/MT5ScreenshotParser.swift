@@ -24,6 +24,17 @@ enum MT5ScreenshotParser {
         return (s.sides.count, s.prices.count, pricePairs(from: lines))
     }
 
+    /// 持仓区里 GOLD/XAU 出现次数（ren 的规则：每个 GOLD 一笔）。
+    /// 合并行里有两个也算两个。
+    private static func goldCount(in lines: [String]) -> Int {
+        guard let firstSymbol = lines.firstIndex(where: { goldSymbol(in: $0) != nil }) else {
+            return 0
+        }
+        return lines[firstSymbol...].reduce(0) {
+            $0 + goldSymbolCount(in: $1)
+        }
+    }
+
     /// 价位对主路径（ren 2026-11-20 再次明确）：只认 GOLD 下方带
     /// 箭头那一行的数字，取箭头左边为开仓价、右边为现价。盈亏
     /// 数字（601.30、746.80 等）排在 GOLD 行右侧，数值又落在
@@ -31,6 +42,9 @@ enum MT5ScreenshotParser {
     /// 做法会把它们当成价格混进流里、整体错位（构建 62 实证：
     /// 601.30 被当成第一笔开仓价、均价算出 3084.18）。箭头行里
     /// 即使粘上盈亏，它也在最右边，取前两个数仍是对的。
+    /// 箭头行数与 GOLD 笔数对不上时（箭头是小字形，OCR 会整行
+    /// 丢掉它，构建 63 实测 4 笔只剩中间 2 行），走 recoverPairs
+    /// 按同行现价找回；整图一个箭头都没有时才退回旧价位流兜底。
     private static func pricePairs(
         from lines: [String]
     ) -> [(entry: Double, current: Double)] {
@@ -41,22 +55,57 @@ enum MT5ScreenshotParser {
                 pairs.append((entry: nums[0], current: nums[1]))
             }
         }
-        if !pairs.isEmpty {
-            // 笔数以 GOLD 出现次数封顶（ren 的规则：每个 GOLD 一笔），
-            // 防箭头行被条带扫描重复组装出多余对。
-            if let firstSymbol = lines.firstIndex(where: { goldSymbol(in: $0) != nil }) {
-                let symbolCount = lines[firstSymbol...].reduce(0) {
-                    $0 + goldSymbolCount(in: $1)
-                }
-                if symbolCount > 0, pairs.count > symbolCount {
-                    pairs = Array(pairs.prefix(symbolCount))
-                }
-            }
+        if pairs.isEmpty {
+            return legacyPricePairs(from: lines)
+        }
+        // 笔数以 GOLD 出现次数封顶（ren 的规则：每个 GOLD 一笔），
+        // 防箭头行被条带扫描重复组装出多余对。
+        let count = goldCount(in: lines)
+        if count > 0, pairs.count > count {
+            pairs = Array(pairs.prefix(count))
+        }
+        if count == 0 || pairs.count == count {
             return pairs
         }
-        // 兜底：整图一个箭头都没读到时才退回旧价位流对位，好过
-        // 直接报废。
-        return legacyPricePairs(from: lines)
+        let recovered = recoverPairs(from: lines, arrowPairs: pairs)
+        return recovered.count > pairs.count ? recovered : pairs
+    }
+
+    /// 箭头行漏认时的恢复（构建 63 实测：4 笔里第 1、4 笔的箭头行
+    /// 没进 OCR 结果，只剩中间 2 对，漏掉的笔静默消失、0.3 手还
+    /// 错位配到下一笔的开仓价上）。已认出的箭头行给出全图统一的
+    /// 现价；其余每笔的开仓价必然与现价在同一行、紧挨现价左边
+    /// （MT5 版面），逐行找「与现价几乎相等的数、取它同行前一个
+    /// 数」即可找回，不需要箭头本身。只认同行前一个数、绝不跨行
+    /// 取：盈亏数字在 GOLD 行或箭头行行尾，跨行就会把盈亏当成
+    /// 开仓价（构建 62 的 601.30 教训）。开仓价本身若被 OCR 丢
+    /// 掉，该行只剩现价一个数、恢复不出，交给 parse 的笔数守卫
+    /// 报失败，不硬凑。
+    private static func recoverPairs(
+        from lines: [String],
+        arrowPairs: [(entry: Double, current: Double)]
+    ) -> [(entry: Double, current: Double)] {
+        // 共识现价：箭头行现价里出现最多的一档（容差 1 点内算同一价）。
+        var consensus: Double?
+        var bestCount = 0
+        for p in arrowPairs {
+            let c = arrowPairs.filter { abs($0.current - p.current) <= 1.0 }.count
+            if c > bestCount {
+                bestCount = c
+                consensus = p.current
+            }
+        }
+        guard let current = consensus,
+              let firstSymbol = lines.firstIndex(where: { goldSymbol(in: $0) != nil })
+        else { return [] }
+        var pairs: [(entry: Double, current: Double)] = []
+        for line in lines[firstSymbol...] {
+            let nums = goldPrices(inLine: line)
+            for (k, v) in nums.enumerated() where k >= 1 && abs(v - current) <= 1.0 {
+                pairs.append((entry: nums[k - 1], current: v))
+            }
+        }
+        return pairs
     }
 
     /// 旧价位流定对（仅作无箭头时的兜底）：笔数 = 价位数的一半、
@@ -67,13 +116,9 @@ enum MT5ScreenshotParser {
     ) -> [(entry: Double, current: Double)] {
         let (_, prices) = streams(from: lines)
         var pairCount = prices.count / 2
-        if let firstSymbol = lines.firstIndex(where: { goldSymbol(in: $0) != nil }) {
-            let symbolCount = lines[firstSymbol...].reduce(0) {
-                $0 + goldSymbolCount(in: $1)
-            }
-            if symbolCount > 0 {
-                pairCount = min(pairCount, symbolCount)
-            }
+        let symbolCount = goldCount(in: lines)
+        if symbolCount > 0 {
+            pairCount = min(pairCount, symbolCount)
         }
         guard pairCount > 0 else { return [] }
         var offset = 0
@@ -114,6 +159,18 @@ enum MT5ScreenshotParser {
         let positions = extractGoldPositions(from: lines)
         guard !positions.isEmpty else {
             throw AppError.message("截图里没有 GOLD 持仓")
+        }
+
+        // 认全才落存：笔数与 GOLD 出现次数对不上 = 有笔被漏掉，
+        // 此时落存会把后面的手数整体错位、算出看着像样的错均价
+        // （构建 63 实测：4 笔只认出 2 笔，0.3 手错配到 3541.47
+        // 上，均价错 3.95、最终价错 23.70）。宁可报失败、保留
+        // 上次的好数据，也不能存错数。
+        let expected = goldCount(in: lines)
+        if expected > 0, positions.count != expected {
+            throw AppError.message(
+                "持仓没认全：图上 \(expected) 笔、只认出 \(positions.count) 笔"
+            )
         }
 
         return ScreenshotTradeData(balance: balance, margin: margin, positions: positions)
