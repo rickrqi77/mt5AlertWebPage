@@ -375,8 +375,13 @@ struct MainView: View {
     }
 
     /// 主画面与最终价同行的平均价：有持仓数据时四舍五入到两位小数，没有时 --。
+    /// 均价右边带合计手数（全角括号，如「3538.56（0.60）」；ren 2026-11-20
+    /// 要求：在主画面一眼看到这组均价是多少手算出来的）。手数写法与最终价
+    /// 明细页的合计手数一致（两位小数）；没有手数数据时只显示均价。
     private var averagePriceText: String {
         guard liquidation.averageEntry > 0 else { return "--" }
-        return String(format: "%.2f", liquidation.averageEntry)
+        let avg = String(format: "%.2f", liquidation.averageEntry)
+        guard liquidation.totalLots > 0 else { return avg }
+        return "\(avg)（\(String(format: "%.2f", liquidation.totalLots))）"
     }
 }
